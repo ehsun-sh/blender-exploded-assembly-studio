@@ -1,0 +1,21 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+
+# Build output
+dist/
+
+# Blender
+*.blend1
+*.blend2
+quit.blend
+
+# Editors / OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+
+# Local agent settings
+.claude/
