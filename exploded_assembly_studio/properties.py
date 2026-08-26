@@ -438,6 +438,13 @@ class EAS_SceneProperties(PropertyGroup):
         description="Set the generated camera as the active scene camera",
         default=True,
     )
+    camera_mirror_on_assemble: BoolProperty(
+        name="Mirror Camera On Assemble",
+        description="Play the camera move backwards when building an Assemble animation, so it "
+                    "continues where an Explode pass ended. Leave this off and the start framing is "
+                    "always the first frame, whichever animation you build",
+        default=False,
+    )
 
     # ------------------------------------------------------------------- misc
     last_report: StringProperty(name="Last Report", default="")

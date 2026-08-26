@@ -505,18 +505,50 @@ def test_camera_poses():
     total = (pose_b.translation - pose_a.translation).length
     check(0.05 * total < between < 0.95 * total, "camera is genuinely travelling between the poses")
 
-    # Assemble mirrors the move, so the two passes read as one continuous shot.
+    # The captured start framing is the first frame of whatever is built, so an
+    # Assemble animation must not silently play the camera backwards.
+    check(not props.camera_mirror_on_assemble, "camera mirroring is off by default")
     bpy.ops.eas.animate(mode='ASSEMBLE')
     start = at_frame(props.frame_start, [camera])[camera.name]
     end = at_frame(props.frame_end, [camera])[camera.name]
-    check(matrices_equal(start, pose_b, 1e-5), "assemble starts from the end pose")
-    check(matrices_equal(end, pose_a, 1e-5), "assemble finishes on the start pose")
+    check(matrices_equal(start, pose_a, 1e-5), "assemble also starts from the captured start pose")
+    check(matrices_equal(end, pose_b, 1e-5), "assemble also finishes on the captured end pose")
+
+    scene.frame_set(props.frame_start)
+    bpy.context.view_layer.update()
+    check(close(camera.data.lens, 35.0, 1e-3), "assemble starts on the start pose focal length")
+
+    # Opting in brings the old continuity behaviour back, for stitching a
+    # rendered explode and assemble pass together.
+    props.camera_mirror_on_assemble = True
+    bpy.ops.eas.animate(mode='ASSEMBLE')
+    start = at_frame(props.frame_start, [camera])[camera.name]
+    end = at_frame(props.frame_end, [camera])[camera.name]
+    check(matrices_equal(start, pose_b, 1e-5), "with mirroring on, assemble starts from the end pose")
+    check(matrices_equal(end, pose_a, 1e-5), "with mirroring on, assemble finishes on the start pose")
+
+    # Explode is unaffected either way.
+    bpy.ops.eas.animate(mode='EXPLODE')
+    start = at_frame(props.frame_start, [camera])[camera.name]
+    check(matrices_equal(start, pose_a, 1e-5), "explode always starts from the captured start pose")
+    props.camera_mirror_on_assemble = False
 
     # Switching back to orbit must restore the parented rig.
     props.camera_mode = 'ORBIT'
     bpy.ops.eas.animate(mode='EXPLODE')
     check(camera.parent is not None, "switching back to orbit re-parents the camera")
     check(bool(camera.constraints), "switching back to orbit restores the aim constraint")
+
+    # Orbit mode has the same contract: Start Angle is the first frame.
+    pivot = props.camera_pivot
+    for mode in ('EXPLODE', 'ASSEMBLE'):
+        bpy.ops.eas.animate(mode=mode)
+        scene.frame_set(props.frame_start)
+        bpy.context.view_layer.update()
+        check(
+            close(pivot.rotation_euler.z, props.camera_start_angle, 1e-5),
+            f"orbit {mode.lower()} begins at the configured start angle",
+        )
 
     # Missing poses must not break the explode.
     props.camera_mode = 'POSES'

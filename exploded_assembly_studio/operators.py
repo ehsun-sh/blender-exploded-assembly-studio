@@ -193,9 +193,11 @@ class EAS_OT_animate(Operator):
         if camera_problem:
             self.report({'WARNING'}, f"Camera skipped: {camera_problem}")
         elif camera_framing is not None:
-            camera_module.animate(
-                context, *camera_framing, reverse=(self.mode == 'ASSEMBLE')
-            )
+            # The start framing means the first frame of whatever is being
+            # built. Only mirror it when the user explicitly asks, for stitching
+            # a rendered Explode and Assemble pass together.
+            mirror_camera = self.mode == 'ASSEMBLE' and props.camera_mirror_on_assemble
+            camera_module.animate(context, *camera_framing, reverse=mirror_camera)
 
         if props.set_scene_range:
             scene.frame_start = start

@@ -5,7 +5,7 @@ both ways — explode and assemble — with an optional camera move. It is aimed
 visualisation for electronics and mechanical hardware: PCBs and enclosures, housings, gearboxes,
 network gear, anything that comes apart into layers.
 
-**Version 1.1.0** · tested on **Blender 5.1.2** · minimum **Blender 4.2** (extension install) or
+**Version 1.2.0** · tested on **Blender 5.1.2** · minimum **Blender 4.2** (extension install) or
 **Blender 3.0** (legacy add-on install)
 
 ```text
@@ -76,7 +76,7 @@ Build the installable zip:
 python build.py
 ```
 
-That produces `dist/exploded_assembly_studio-1.1.0.zip`.
+That produces `dist/exploded_assembly_studio-1.2.0.zip`.
 
 **Blender 4.2 and newer (recommended)**
 `Edit → Preferences → Get Extensions → ▼ → Install from Disk…` and pick the zip.
@@ -203,6 +203,10 @@ Start and end frame, interpolation (Bezier, Linear, Sine, Quadratic, Cubic, Expo
 Elastic) and easing direction. `Back` and `Elastic` give the slight overshoot that reads as
 "product advert"; `Sine` with ease-in-out is the safe technical choice.
 
+**EXPLODE builds assembled → apart. ASSEMBLE builds apart → assembled.** Pick the one that matches
+the story you are telling: for a product that builds itself, components dropping onto the board and
+the shells closing over it, that is **ASSEMBLE**.
+
 `Replace Existing` clears the add-on's transform channels before writing new ones, so repeated
 clicks never stack up duplicate keys. `Auto Save Assembly State` records the assembled pose for any
 part that does not have one yet, so a first-time explode works even if you forget step 5.
@@ -279,7 +283,9 @@ Notes:
   orientations instead of unwinding through euler gimbal.
 - In this mode the camera has no parent and no aim constraint, so the captured framing is exactly
   what renders. Switching back to Orbit rebuilds the rig.
-- The assemble pass mirrors the move, so explode and assemble read as one continuous camera shot.
+- The start framing is the first frame of whatever you build, Explode or Assemble. If you want to
+  render both passes and stitch them together, turn on **Mirror On Assemble** and the assemble pass
+  plays the camera backwards so it continues where the explode pass ended.
 
 ### Active Part
 
@@ -348,7 +354,7 @@ blender -b --factory-startup --python tests/test_addon.py
 The suite builds a synthetic PCB product and drives the whole workflow: presets, saving state,
 explode, assemble, all four direction modes crossed with all three spacing modes, parented and
 rotated hierarchies, staggered sequencing, per-part overrides, exclusion, clearing animation, and
-all three camera modes. Current result: **95 of 95 checks pass** on Blender 5.1.2.
+all three camera modes. Current result: **102 of 102 checks pass** on Blender 5.1.2.
 
 The camera-framing tests re-derive the expected distance from the optics formula independently of
 the add-on, and check that it scales correctly with both subject size and focal length.

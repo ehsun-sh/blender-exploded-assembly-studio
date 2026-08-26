@@ -3,6 +3,23 @@
 All notable changes to Exploded Assembly Studio are documented here.
 This project follows [Semantic Versioning](https://semver.org/).
 
+## [1.2.0]
+
+### Fixed
+
+- **The camera played backwards when building an Assemble animation.** The captured start framing
+  ended up on the last frame and the end framing on the first. Assemble is the natural choice for a
+  product that builds itself — components landing on the board, shells closing over it — so this hit
+  the main workflow. The start framing is now the first frame of whatever you build, in every camera
+  mode. The same applied to Orbit mode, where Start Angle was silently swapped with the end of the
+  orbit.
+
+### Added
+
+- **Mirror On Assemble** camera option, off by default. Turning it on restores the previous
+  behaviour, which is useful if you render an Explode pass and an Assemble pass and stitch them
+  together, since the camera then continues where the first pass ended.
+
 ## [1.1.0]
 
 ### Added

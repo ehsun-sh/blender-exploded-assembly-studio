@@ -302,6 +302,7 @@ class EAS_PT_camera(EASPanel, Panel):
         row = column.row()
         row.active = props.camera_interpolation not in {'LINEAR', 'BEZIER'}
         row.prop(props, "camera_easing", text="Easing")
+        column.prop(props, "camera_mirror_on_assemble", text="Mirror On Assemble")
         column.prop(props, "camera_set_active")
 
         column.separator()
