@@ -269,6 +269,21 @@ class EAS_PT_animation(EASPanel, Panel):
         column.prop(props, "frame_start")
         column.prop(props, "frame_end")
 
+        # The frame range is the whole shot; these carve out where inside it
+        # the parts actually move, leaving the camera running either side.
+        column = layout.column(align=True)
+        column.prop(props, "parts_pre_roll", text="Pre Action")
+        column.prop(props, "parts_post_roll", text="Post Action")
+
+        start, end = core.parts_frame_range(props)
+        low, high = core.frame_range_of(props)
+        if props.parts_pre_roll or props.parts_post_roll:
+            note = layout.column(align=True)
+            note.scale_y = 0.85
+            note.label(text=f"Parts move {start:.0f}-{end:.0f} of the {low}-{high} shot",
+                       icon='TIME')
+            note.label(text="the camera keeps moving either side")
+
         layout.prop(props, "interpolation")
         row = layout.row()
         row.active = props.interpolation not in {'LINEAR', 'BEZIER'}
@@ -322,6 +337,23 @@ class EAS_PT_camera(EASPanel, Panel):
         dolly.prop(props, "camera_zoom_start")
         dolly.prop(props, "camera_zoom_end")
         dolly.prop(props, "camera_height_end")
+
+    @staticmethod
+    def draw_timing_note(context, layout, props):
+        """Who moves when, so the two sets of delays are readable at a glance."""
+        low, high = core.frame_range_of(props)
+        cam_start, cam_end = camera.camera_frame_range(props)
+        part_start, part_end = core.parts_frame_range(props)
+
+        if not (props.camera_delay_start or props.camera_delay_end
+                or props.parts_pre_roll or props.parts_post_roll):
+            return
+
+        note = layout.column(align=True)
+        note.scale_y = 0.85
+        note.label(text=f"Shot {low}-{high}", icon='TIME')
+        note.label(text=f"camera moves {cam_start:.0f}-{cam_end:.0f}")
+        note.label(text=f"parts move {part_start:.0f}-{part_end:.0f}")
 
     def draw_orbit(self, context, column, props):
         column.prop(props, "camera_focal")
@@ -427,28 +459,20 @@ class EAS_PT_camera(EASPanel, Panel):
         row.prop(props, "camera_mode", expand=True)
         column.separator()
 
+        # Kept above the per-mode settings: those can run long, and a timing
+        # control buried under them is a control nobody finds.
+        delay = column.column(align=True)
+        delay.prop(props, "camera_delay_start", text="Start Delay")
+        delay.prop(props, "camera_delay_end", text="End Delay")
+        self.draw_timing_note(context, column, props)
+        column.separator()
+
         if props.camera_mode == 'POSES':
             self.draw_poses(context, column, props)
         elif props.camera_mode == 'SUBJECT':
             self.draw_subject(context, column, props)
         else:
             self.draw_orbit(context, column, props)
-
-        column.separator()
-        hold = column.column(align=True)
-        hold.prop(props, "camera_delay_start", text="Hold Start")
-        hold.prop(props, "camera_delay_end", text="Hold End")
-        start, end = camera.camera_frame_range(props)
-        low, high = core.frame_range_of(props)
-        if props.camera_delay_start or props.camera_delay_end:
-            fps = context.scene.render.fps / max(context.scene.render.fps_base, 1e-6)
-            note = column.column(align=True)
-            note.scale_y = 0.85
-            note.label(text=f"Camera moves frames {start:.0f} - {end:.0f} of {low}-{high}",
-                       icon='TIME')
-            if fps > 0:
-                note.label(text=f"holds {props.camera_delay_start / fps:.2f} s "
-                                f"then {props.camera_delay_end / fps:.2f} s")
 
         column.separator()
         # Per viewpoint timing replaces these in From Viewport mode.

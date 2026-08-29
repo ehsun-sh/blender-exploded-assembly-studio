@@ -5,7 +5,7 @@ both ways — explode and assemble — with an optional camera move. It is aimed
 visualisation for electronics and mechanical hardware: PCBs and enclosures, housings, gearboxes,
 network gear, anything that comes apart into layers.
 
-**Version 1.7.0** · tested on **Blender 5.1.2** · minimum **Blender 4.2** (extension install) or
+**Version 1.8.0** · tested on **Blender 5.1.2** · minimum **Blender 4.2** (extension install) or
 **Blender 3.0** (legacy add-on install)
 
 ```text
@@ -79,7 +79,7 @@ Build the installable zip:
 python build.py
 ```
 
-That produces `dist/exploded_assembly_studio-1.7.0.zip`.
+That produces `dist/exploded_assembly_studio-1.8.0.zip`.
 
 **Blender 4.2 and newer (recommended)**
 `Edit → Preferences → Get Extensions → ▼ → Install from Disk…` and pick the zip.
@@ -328,10 +328,28 @@ part that does not have one yet, so a first-time explode works even if you forge
 
 ### Camera
 
-#### Holding still at each end
+#### Delays, and who moves when
 
-`Hold Start` and `Hold End` keep the camera parked for a number of frames before it starts moving
-and after it arrives. This matters more than it sounds: a camera that starts moving on frame 1
+The frame range is the **whole shot**. Two pairs of settings carve it up, and they are independent:
+
+| Setting | Where | What waits |
+|---|---|---|
+| `Start Delay` / `End Delay` | Camera panel, at the top | The **camera** holds still; the parts carry on |
+| `Pre Action` / `Post Action` | Animation panel | The **parts** hold still; the camera carries on |
+
+```text
+shot        1 ─────────────────────────────────────── 120
+parts             31 ──────────────────── 100
+camera      1 ─────────────────────────────────────── 120
+            └ pre action ┘             └ post action ┘
+```
+
+**Pre Action** and **Post Action** are how a shot opens on a camera move before anything assembles,
+and carries on around the finished product afterwards. You do not need a separate camera list for
+those stretches: the camera path already spans the whole shot, so add viewpoints and set their
+`Time` to place them wherever you want, including inside the pre and post windows.
+
+`Start Delay` and `End Delay` do the opposite — they park the camera. This matters more than it sounds: a camera that starts moving on frame 1
 competes with the parts for attention, and the beginning of the assembly gets lost. Holding for the
 first 10–20 frames lets the viewer watch the parts land, then the camera takes over.
 
@@ -520,7 +538,7 @@ blender -b --factory-startup --python tests/test_addon.py
 The suite builds a synthetic PCB product and drives the whole workflow: presets, saving state,
 explode, assemble, all four direction modes crossed with all three spacing modes, parented and
 rotated hierarchies, staggered sequencing, per-part overrides, exclusion, clearing animation, and
-all three camera modes, the enclosure phase and the multi viewpoint camera. Current result: **211 of 211 checks pass** on Blender 5.1.2.
+all three camera modes, the enclosure phase and the multi viewpoint camera. Current result: **224 of 224 checks pass** on Blender 5.1.2.
 
 The camera-framing tests re-derive the expected distance from the optics formula independently of
 the add-on, and check that it scales correctly with both subject size and focal length.

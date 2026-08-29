@@ -1555,6 +1555,111 @@ def test_parts_offscreen():
     props.parts_offscreen = False
 
 
+def test_pre_post_roll():
+    print("\n[15] Camera keeps moving before and after the parts")
+    from exploded_assembly_studio import camera as camera_module
+    from exploded_assembly_studio import core
+
+    scene, collection, parts = build_scene()
+    props = scene.eas
+    props.source = 'COLLECTION'
+    props.collection = collection
+    props.direction = 'WORLD_AXIS'
+    props.axis = 'Z'
+    props.distance = 0.05
+    props.frame_start = 1
+    props.frame_end = 120
+    props.use_sequence = False
+
+    objects = list(collection.all_objects)
+    select(objects, active=parts['pcb'])
+    bpy.ops.eas.set_assembly_position()
+    assembled = world_matrices(objects)
+
+    # An orbiting camera so there is a move to observe either side.
+    props.use_camera = True
+    props.camera_mode = 'ORBIT'
+    props.camera_orbit = 3.14159
+    props.camera_delay_start = 0
+    props.camera_delay_end = 0
+
+    # ---- without any roll, everything spans the shot -----------------------
+    props.parts_pre_roll = 0
+    props.parts_post_roll = 0
+    start, end = core.parts_frame_range(props)
+    check(close(start, 1.0) and close(end, 120.0), f"parts span the whole shot ({start}-{end})")
+
+    # ---- carve time off each end ------------------------------------------
+    props.parts_pre_roll = 30
+    props.parts_post_roll = 20
+    start, end = core.parts_frame_range(props)
+    check(close(start, 31.0) and close(end, 100.0), f"parts now move 31-100 ({start}-{end})")
+
+    cam_start, cam_end = camera_module.camera_frame_range(props)
+    check(close(cam_start, 1.0) and close(cam_end, 120.0),
+          f"the camera still spans the whole shot ({cam_start}-{cam_end})")
+
+    bpy.ops.eas.animate(mode='ASSEMBLE')
+    check(scene.frame_start == 1 and scene.frame_end == 120, "scene range covers the whole shot")
+
+    frames = key_frames(parts['top_case'])
+    check(close(frames[0], 31.0, 0.6) and close(frames[-1], 100.0, 0.6),
+          f"part keys land inside the action window ({frames})")
+
+    # The parts must be genuinely still during both rolls.
+    early_a = at_frame(1, objects)
+    early_b = at_frame(30, objects)
+    late_a = at_frame(100, objects)
+    late_b = at_frame(120, objects)
+    still_start = max(
+        (early_a[o.name].translation - early_b[o.name].translation).length for o in objects
+    )
+    still_end = max(
+        (late_a[o.name].translation - late_b[o.name].translation).length for o in objects
+    )
+    check(still_start < 1e-9, f"parts hold through the pre roll ({still_start:.2e})")
+    check(still_end < 1e-9, f"parts hold through the post roll ({still_end:.2e})")
+
+    # ...and the camera must be moving through exactly those windows.
+    cam = props.camera_object
+    cam_1 = at_frame(1, [cam])[cam.name].translation.copy()
+    cam_30 = at_frame(30, [cam])[cam.name].translation.copy()
+    cam_100 = at_frame(100, [cam])[cam.name].translation.copy()
+    cam_120 = at_frame(120, [cam])[cam.name].translation.copy()
+    check((cam_1 - cam_30).length > 1e-3,
+          f"the camera moves during the pre roll ({(cam_1 - cam_30).length:.3f})")
+    check((cam_100 - cam_120).length > 1e-3,
+          f"the camera moves during the post roll ({(cam_100 - cam_120).length:.3f})")
+
+    # The product is finished and holding for the whole post roll.
+    worst = max(
+        max(abs(x - y) for ra, rb in zip(assembled[n], late_b[n]) for x, y in zip(ra, rb))
+        for n in assembled
+    )
+    check(worst <= TOLERANCE, f"the product is complete through the post roll ({worst:.3e})")
+
+    # ---- the two delays are independent ------------------------------------
+    props.camera_delay_start = 10
+    props.camera_delay_end = 5
+    cam_start, cam_end = camera_module.camera_frame_range(props)
+    start, end = core.parts_frame_range(props)
+    check(close(cam_start, 11.0) and close(cam_end, 115.0),
+          f"camera delays still apply on top ({cam_start}-{cam_end})")
+    check(close(start, 31.0) and close(end, 100.0),
+          "and they do not move the parts window")
+
+    # ---- absurd rolls must not invert the range ----------------------------
+    props.parts_pre_roll = 500
+    props.parts_post_roll = 500
+    start, end = core.parts_frame_range(props)
+    check(end > start, f"absurd rolls still give a valid window ({start:.0f}-{end:.0f})")
+
+    props.parts_pre_roll = 0
+    props.parts_post_roll = 0
+    props.camera_delay_start = 0
+    props.camera_delay_end = 0
+
+
 def main():
     print("=" * 72)
     print(f"Exploded Assembly Studio - headless test on Blender {bpy.app.version_string}")
@@ -1574,6 +1679,7 @@ def main():
     test_rebuild()
     test_snapshots()
     test_parts_offscreen()
+    test_pre_post_roll()
 
     print("\n" + "=" * 72)
     if FAILURES:

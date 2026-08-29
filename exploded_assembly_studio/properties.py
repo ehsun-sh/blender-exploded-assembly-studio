@@ -437,6 +437,23 @@ class EAS_SceneProperties(PropertyGroup):
         description="Last frame of the generated animation",
         default=60,
     )
+    parts_pre_roll: IntProperty(
+        name="Pre Action",
+        description="Frames at the start of the shot where the parts stay put. The camera still "
+                    "moves through them, so the shot can open on a camera move before anything "
+                    "starts assembling",
+        default=0,
+        min=0,
+        soft_max=240,
+    )
+    parts_post_roll: IntProperty(
+        name="Post Action",
+        description="Frames at the end of the shot after the parts have finished. The camera keeps "
+                    "moving through them, so it can carry on around the finished product",
+        default=0,
+        min=0,
+        soft_max=240,
+    )
     interpolation: EnumProperty(
         name="Interpolation",
         description="F-Curve interpolation of the generated keyframes",

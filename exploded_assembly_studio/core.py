@@ -683,9 +683,7 @@ def build_timing(props, ordered):
 
     Returns a dict keyed by object name so callers do not depend on ordering.
     """
-    low, high = frame_range_of(props)
-    low = float(low)
-    high = float(high)
+    low, high = parts_frame_range(props)
     groups = split_phases(props, ordered)
 
     if len(groups) < 2:
@@ -727,21 +725,22 @@ def _staggered(index, count, low, high, props):
     return part_start, min(part_start + segment, high)
 
 
-def part_timing(index, count, props):
-    """Frame range for one part inside the overall animation range."""
-    low, high = frame_range_of(props)
-    start = float(low)
-    end = float(high)
-    if not props.use_sequence or count <= 1 or end <= start:
-        return start, end
+def parts_frame_range(props):
+    """The frames the parts move over, inside the overall shot.
 
-    overlap = min(max(props.overlap, 0.0), 0.999)
-    span = end - start
-    segment = span / (count - (count - 1) * overlap)
-    step = segment * (1.0 - overlap)
-    part_start = start + index * step
-    part_end = min(part_start + segment, end)
-    return part_start, part_end
+    Pre and post roll carve time off each end where the parts stay put while
+    the camera keeps going. That is how a shot opens on a camera move before
+    anything assembles, and carries on around the finished product afterwards.
+    """
+    low, high = frame_range_of(props)
+    start = float(low) + props.parts_pre_roll
+    end = float(high) - props.parts_post_roll
+    if end <= start:
+        # The rolls swallowed the range; keep a valid, non-inverted pair.
+        middle = (float(low) + float(high)) * 0.5
+        start = min(max(start, float(low)), middle)
+        end = start + 1.0
+    return start, end
 
 
 # ---------------------------------------------------------------------------

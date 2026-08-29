@@ -3,6 +3,28 @@
 All notable changes to Exploded Assembly Studio are documented here.
 This project follows [Semantic Versioning](https://semver.org/).
 
+## [1.8.0]
+
+### Added
+
+- **Pre Action and Post Action.** Frames at each end of the shot where the parts stay put while the
+  camera keeps moving, so a shot can open on a camera move before anything assembles and carry on
+  around the finished product afterwards. No separate camera list is needed for those stretches: the
+  camera path already spans the whole shot, so a viewpoint's `Time` places it wherever you want.
+- A timing readout in both panels showing the shot range, the frames the camera moves over, and the
+  frames the parts move over, so the two sets of delays are readable at a glance.
+
+### Changed
+
+- **The camera hold is now labelled `Start Delay` and `End Delay`, and sits at the top of the Camera
+  panel.** It was called "Hold Start"/"Hold End" and sat underneath the per-mode settings, which in
+  From Viewport mode meant scrolling past a viewpoint list to reach it. A timing control nobody can
+  find is a timing control that does not exist.
+
+### Removed
+
+- Dead `part_timing` helper, superseded by the phase-aware timing added in 1.3.0.
+
 ## [1.7.0]
 
 ### Added
