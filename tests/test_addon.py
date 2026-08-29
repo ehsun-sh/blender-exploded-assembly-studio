@@ -1660,6 +1660,122 @@ def test_pre_post_roll():
     props.camera_delay_end = 0
 
 
+def test_enclosure_custom_range():
+    print("\n[16] Enclosure timed independently of the parts")
+    from exploded_assembly_studio import core
+
+    scene, collection, parts = build_box_scene()
+    props = scene.eas
+    props.source = 'COLLECTION'
+    props.collection = collection
+    props.use_camera = False
+    props.direction = 'AXIS_SPLIT'
+    props.center_mode = 'ACTIVE'
+    props.distance = 0.03
+    props.frame_start = 1
+    props.frame_end = 200
+    props.use_sequence = True
+    props.overlap = 0.7
+
+    objects = list(collection.all_objects)
+    select(objects, active=parts['pcb'])
+    bpy.ops.eas.set_assembly_position()
+    assembled = world_matrices(objects)
+
+    shells = [obj for name, obj in parts.items() if name.startswith("Shell_")]
+    select(shells, active=shells[0])
+    bpy.ops.eas.mark_role(role='ENCLOSURE')
+    select(objects, active=parts['pcb'])
+    bpy.ops.eas.detect_sides()
+
+    part_objects = [o for o in objects if o.eas.role == 'PART']
+    shell_objects = [o for o in objects if o.eas.role == 'ENCLOSURE']
+
+    def windows():
+        p = [key_frames(o) for o in part_objects if key_frames(o)]
+        s = [key_frames(o) for o in shell_objects if key_frames(o)]
+        return (min(f[0] for f in p), max(f[-1] for f in p),
+                min(f[0] for f in s), max(f[-1] for f in s))
+
+    # ---- the parts window is driven by pre/post action ---------------------
+    props.parts_pre_roll = 20
+    props.parts_post_roll = 30
+    check(not props.enclosure_custom_range, "custom range is off by default")
+
+    bpy.ops.eas.animate(mode='ASSEMBLE')
+    p_start, p_end, s_start, s_end = windows()
+    check(close(p_start, 21.0, 0.6), f"parts start after the pre action ({p_start:.0f})")
+    check(s_end <= 170.0 + 0.6, f"shell still ends inside the post action limit ({s_end:.0f})")
+
+    # ---- switching on seeds the fields from what was already happening -----
+    props.enclosure_custom_range = True
+    seeded = (props.enclosure_frame_start, props.enclosure_frame_end)
+    check(
+        seeded[0] > p_start and seeded[1] <= 170,
+        f"turning it on seeds sensible frames from the automatic split {seeded}",
+    )
+
+    # ---- now drive the two windows completely independently ---------------
+    props.enclosure_frame_start = 150
+    props.enclosure_frame_end = 195
+    bpy.ops.eas.animate(mode='ASSEMBLE')
+    p_start, p_end, s_start, s_end = windows()
+
+    check(close(s_start, 150.0, 0.6), f"shell starts exactly on frame 150 ({s_start:.1f})")
+    check(close(s_end, 195.0, 0.6), f"shell ends exactly on frame 195 ({s_end:.1f})")
+    check(close(p_start, 21.0, 0.6), f"parts keep their own start ({p_start:.1f})")
+    check(close(p_end, 170.0, 0.6), f"parts keep their own end ({p_end:.1f})")
+    check(s_end > core.parts_frame_range(props)[1], "the shell can now run past the parts window")
+
+    # Moving one window must not move the other.
+    props.enclosure_frame_start = 60
+    props.enclosure_frame_end = 90
+    bpy.ops.eas.animate(mode='ASSEMBLE')
+    p_start2, p_end2, s_start2, s_end2 = windows()
+    check(close(s_start2, 60.0, 0.6) and close(s_end2, 90.0, 0.6),
+          f"shell follows its new frames ({s_start2:.0f}-{s_end2:.0f})")
+    check(close(p_start2, p_start, 0.6) and close(p_end2, p_end, 0.6),
+          "and the parts window did not move")
+
+    # An overlapping range is allowed but reported.
+    check(s_start2 < p_end2, "this range deliberately overlaps the parts")
+
+    # Inverted input must not produce an inverted window.
+    props.enclosure_frame_start = 120
+    props.enclosure_frame_end = 80
+    low, high = core.enclosure_window(props)
+    check(low < high, f"inverted frames are ordered, not inverted ({low:.0f}-{high:.0f})")
+
+    # ---- and the round trip still lands home -------------------------------
+    props.enclosure_frame_start = 150
+    props.enclosure_frame_end = 195
+    bpy.ops.eas.animate(mode='ASSEMBLE')
+    home = at_frame(props.frame_end, objects)
+    worst = max(
+        max(abs(x - y) for ra, rb in zip(assembled[n], home[n]) for x, y in zip(ra, rb))
+        for n in assembled
+    )
+    check(worst <= TOLERANCE, f"independent windows still land home ({worst:.3e})")
+
+    # Nothing moves before its own window opens.
+    early = at_frame(140, objects)
+    shell_moved = max(
+        (early[o.name].translation - at_frame(1, objects)[o.name].translation).length
+        for o in shell_objects
+    )
+    check(shell_moved < 1e-9, f"the shell is still parked at frame 140 ({shell_moved:.2e})")
+
+    # ---- turning it off restores the automatic split ----------------------
+    props.enclosure_custom_range = False
+    bpy.ops.eas.animate(mode='ASSEMBLE')
+    _, p_end3, s_start3, _ = windows()
+    check(s_start3 >= p_end3 - 1e-6,
+          f"the automatic split is back, shell after parts ({p_end3:.0f} -> {s_start3:.0f})")
+
+    props.parts_pre_roll = 0
+    props.parts_post_roll = 0
+
+
 def main():
     print("=" * 72)
     print(f"Exploded Assembly Studio - headless test on Blender {bpy.app.version_string}")
@@ -1680,6 +1796,7 @@ def main():
     test_snapshots()
     test_parts_offscreen()
     test_pre_post_roll()
+    test_enclosure_custom_range()
 
     print("\n" + "=" * 72)
     if FAILURES:

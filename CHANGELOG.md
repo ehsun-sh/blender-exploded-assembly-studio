@@ -3,6 +3,21 @@
 All notable changes to Exploded Assembly Studio are documented here.
 This project follows [Semantic Versioning](https://semver.org/).
 
+## [1.9.0]
+
+### Added
+
+- **Custom Frame Range for the enclosure.** The shell can be given its own start and end frame
+  instead of deriving them from `Parts Share` and `Phase Delay`. The parts keep the window that
+  `Pre Action` and `Post Action` give them, so the two are timed completely independently and the
+  shell can run past the end of the parts window.
+- Switching it on seeds the fields from whatever the automatic split was already producing, so an
+  explicit range continues what was happening rather than jumping to arbitrary numbers.
+- Both windows are shown together in the panel, with a warning when the shell would start before the
+  parts finish. That is allowed — an explicit range is the user's call — but it means the case closes
+  over a board that is still filling up.
+- Inverted start and end frames are ordered rather than producing an inverted window.
+
 ## [1.8.0]
 
 ### Added

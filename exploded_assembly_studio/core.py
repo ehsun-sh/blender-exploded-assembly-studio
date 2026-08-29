@@ -678,6 +678,28 @@ def split_phases(props, ordered):
     return [(items, flag) for items, flag in groups]
 
 
+def derived_enclosure_window(props):
+    """The enclosure window the automatic Parts Share / Phase Delay split gives.
+
+    Used to seed the explicit frame fields, so switching to a custom range
+    starts from what was already happening instead of from arbitrary numbers.
+    """
+    low, high = parts_frame_range(props)
+    span = max(high - low, 0.0)
+    gap = min(float(props.phase_gap_frames), span * 0.8)
+    usable = max(span - gap, 0.0)
+    return low + usable * props.parts_share + gap, high
+
+
+def enclosure_window(props):
+    """The explicit enclosure frame range, ordered and never inverted."""
+    low = float(min(props.enclosure_frame_start, props.enclosure_frame_end))
+    high = float(max(props.enclosure_frame_start, props.enclosure_frame_end))
+    if high <= low:
+        high = low + 1.0
+    return low, high
+
+
 def build_timing(props, ordered):
     """Frame range for every part, honouring the enclosure phase split.
 
@@ -686,27 +708,40 @@ def build_timing(props, ordered):
     low, high = parts_frame_range(props)
     groups = split_phases(props, ordered)
 
+    # An explicit enclosure range detaches the shell from the automatic split
+    # entirely: the parts keep their own window and the shell keeps this one.
+    explicit = enclosure_window(props) if (
+        props.use_phases and props.enclosure_custom_range
+    ) else None
+
     if len(groups) < 2:
-        parts = groups[0][0] if groups else []
+        parts, is_shell = groups[0] if groups else ([], False)
+        window = explicit if (is_shell and explicit) else (low, high)
         return {
-            part.obj.name: _staggered(index, len(parts), low, high, props)
+            part.obj.name: _staggered(index, len(parts), window[0], window[1], props)
             for index, part in enumerate(parts)
         }
 
-    # Two phases: parts get their share of the range, the shell gets the rest,
-    # with an explicit pause between them. Because every part in a group ends
-    # at or before the group's last frame, the shell can never start moving
-    # before the last part has landed.
-    span = max(high - low, 0.0)
-    gap = min(float(props.phase_gap_frames), span * 0.8)
-    usable = max(span - gap, 0.0)
-    first_is_enclosure = groups[0][1]
-    share = props.parts_share
-    first_len = usable * ((1.0 - share) if first_is_enclosure else share)
-    second_len = usable - first_len
+    if explicit is not None:
+        bounds = [explicit if flag else (low, high) for _items, flag in groups]
+    else:
+        # Two phases: parts get their share of the range, the shell gets the
+        # rest, with an explicit pause between them. Because every part in a
+        # group ends at or before the group's last frame, the shell can never
+        # start moving before the last part has landed.
+        span = max(high - low, 0.0)
+        gap = min(float(props.phase_gap_frames), span * 0.8)
+        usable = max(span - gap, 0.0)
+        first_is_enclosure = groups[0][1]
+        share = props.parts_share
+        first_len = usable * ((1.0 - share) if first_is_enclosure else share)
+        second_len = usable - first_len
+        bounds = [
+            (low, low + first_len),
+            (low + first_len + gap, low + first_len + gap + second_len),
+        ]
 
     timing = {}
-    bounds = [(low, low + first_len), (low + first_len + gap, low + first_len + gap + second_len)]
     for (parts, _flag), (group_low, group_high) in zip(groups, bounds):
         for index, part in enumerate(parts):
             timing[part.obj.name] = _staggered(index, len(parts), group_low, group_high, props)

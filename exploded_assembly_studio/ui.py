@@ -219,13 +219,31 @@ class EAS_PT_enclosure(EASPanel, Panel):
         settings = block.column()
         settings.use_property_split = True
         settings.separator()
-        settings.prop(props, "parts_share")
-        settings.prop(props, "phase_gap_frames", text="Phase Delay")
+        settings.prop(props, "enclosure_custom_range")
 
+        parts_start, parts_end = core.parts_frame_range(props)
         fps = context.scene.render.fps / max(context.scene.render.fps_base, 1e-6)
-        if props.phase_gap_frames and fps > 0:
-            settings.label(text=f"{props.phase_gap_frames / fps:.2f} s pause before the shell closes",
-                           icon='TIME')
+
+        if props.enclosure_custom_range:
+            frames = settings.column(align=True)
+            frames.prop(props, "enclosure_frame_start", text="Start Frame")
+            frames.prop(props, "enclosure_frame_end", text="End Frame")
+
+            shell_start, shell_end = core.enclosure_window(props)
+            note = settings.column(align=True)
+            note.scale_y = 0.85
+            note.label(text=f"Parts {parts_start:.0f}-{parts_end:.0f}, "
+                            f"shell {shell_start:.0f}-{shell_end:.0f}", icon='TIME')
+            if shell_start < parts_end - 1e-6:
+                note.label(text="Shell starts before the parts finish", icon='ERROR')
+        else:
+            settings.prop(props, "parts_share")
+            settings.prop(props, "phase_gap_frames", text="Phase Delay")
+            if props.phase_gap_frames and fps > 0:
+                settings.label(
+                    text=f"{props.phase_gap_frames / fps:.2f} s pause before the shell closes",
+                    icon='TIME',
+                )
 
         settings.separator()
         settings.prop(props, "enclosure_offscreen")

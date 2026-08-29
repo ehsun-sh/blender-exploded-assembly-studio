@@ -229,6 +229,18 @@ class EAS_OT_animate(Operator):
         start, end = core.frame_range_of(props)
         timing = core.build_timing(props, ordered)
 
+        # An explicit enclosure range is the user's call, but overlapping the
+        # parts means the shell closes over a board that is still filling up.
+        if props.use_phases and props.enclosure_custom_range:
+            shell_start, _shell_end = core.enclosure_window(props)
+            _parts_start, parts_end = core.parts_frame_range(props)
+            if shell_start < parts_end - 1e-6:
+                self.report(
+                    {'WARNING'},
+                    f"Enclosure starts on frame {shell_start:.0f} but the parts run to "
+                    f"{parts_end:.0f}, so the shell closes while they are still arriving",
+                )
+
         for part in ordered:
             obj = part.obj
             if self.mode == 'EXPLODE':

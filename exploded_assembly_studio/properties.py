@@ -105,6 +105,20 @@ MOTION_ITEMS = [
 ]
 
 
+def _seed_enclosure_range(self, context):
+    """Start a custom enclosure range from whatever the automatic split gave.
+
+    Switching to explicit frames should continue what was already happening
+    rather than jumping to arbitrary numbers.
+    """
+    if not self.enclosure_custom_range:
+        return
+    from . import core
+    start, end = core.derived_enclosure_window(self)
+    self.enclosure_frame_start = int(round(start))
+    self.enclosure_frame_end = int(round(end))
+
+
 def _subject_poll(self, obj):
     """Only offer objects that can actually be framed."""
     if obj.eas.is_rig:
@@ -396,6 +410,24 @@ class EAS_SceneProperties(PropertyGroup):
         default=10,
         min=0,
         soft_max=200,
+    )
+    enclosure_custom_range: BoolProperty(
+        name="Custom Frame Range",
+        description="Give the enclosure its own start and end frame instead of deriving them from "
+                    "Parts Share and Phase Delay. The parts keep their own window, so the two are "
+                    "timed completely independently",
+        default=False,
+        update=_seed_enclosure_range,
+    )
+    enclosure_frame_start: IntProperty(
+        name="Enclosure Start",
+        description="Frame the enclosure panels start moving on",
+        default=40,
+    )
+    enclosure_frame_end: IntProperty(
+        name="Enclosure End",
+        description="Frame the enclosure panels finish on",
+        default=60,
     )
     enclosure_offscreen: BoolProperty(
         name="Start Off Camera",
