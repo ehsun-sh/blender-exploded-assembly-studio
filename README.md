@@ -5,7 +5,7 @@ both ways — explode and assemble — with an optional camera move. It is aimed
 visualisation for electronics and mechanical hardware: PCBs and enclosures, housings, gearboxes,
 network gear, anything that comes apart into layers.
 
-**Version 1.4.0** · tested on **Blender 5.1.2** · minimum **Blender 4.2** (extension install) or
+**Version 1.5.0** · tested on **Blender 5.1.2** · minimum **Blender 4.2** (extension install) or
 **Blender 3.0** (legacy add-on install)
 
 ```text
@@ -19,6 +19,7 @@ Assembled model  →  Explode animation  →  Exploded view  →  Assemble anima
 - [What it does](#what-it-does)
 - [Install](#install)
 - [Quick start: a PCB product](#quick-start-a-pcb-product)
+- [Checking it works](#checking-it-works)
 - [Try it without a model](#try-it-without-a-model)
 - [Panel reference](#panel-reference)
   - [Source](#source)
@@ -77,7 +78,7 @@ Build the installable zip:
 python build.py
 ```
 
-That produces `dist/exploded_assembly_studio-1.4.0.zip`.
+That produces `dist/exploded_assembly_studio-1.5.0.zip`.
 
 **Blender 4.2 and newer (recommended)**
 `Edit → Preferences → Get Extensions → ▼ → Install from Disk…` and pick the zip.
@@ -120,6 +121,44 @@ The panel then lives in:
 
 Not happy with the spread? Change **Distance** and press the button again. There is no need to undo
 anything first — the parts are always measured from the saved assembled state.
+
+### Changing a setting afterwards
+
+Every setting is read fresh each time an animation is built, and the parts are always measured from
+the saved assembly position rather than from wherever they happen to be sitting. So the loop is:
+
+```text
+change a setting  →  press Rebuild  →  watch  →  repeat
+```
+
+**Rebuild** repeats whichever of the two you built last — the button says so, `Rebuild Assemble` or
+`Rebuild Explode` — so you cannot accidentally flip the direction of the animation while tweaking.
+It is safe to press at any frame, as often as you like, and it never stacks up duplicate keyframes.
+There is no need to undo, clear, or return to frame 1 first.
+
+---
+
+## Checking it works
+
+A quick pass to confirm a setup is sound before committing to a render:
+
+1. **Save the file first.** Everything below is undoable, but a saved file is a better safety net.
+2. **Press Set Assembly Position** with the parts where they belong. The Source line should report
+   the number of parts you expect — if it says fewer, something is hidden or outside the collection.
+3. **Press Preview Exploded.** This moves the parts with no keyframes, so you can see the spread
+   instantly. Too much or too little? Change `Distance` and press it again. Then **Restore**.
+4. **Build the animation** and scrub the timeline by hand rather than playing it. Playback hides
+   ordering problems that scrubbing makes obvious.
+5. **Check frame 1 and the last frame.** For an assemble, the last frame must look exactly like the
+   product you started with. If it does not, the assembly position was saved from the wrong state —
+   restore, fix, and save it again.
+6. **Check the camera through the lens**, not from a user view. Press <kbd>Numpad 0</kbd> and scrub
+   again: a move that looks fine in the viewport can crop parts in the render frame.
+7. **Render a low-quality preview** before the real one — small resolution, a low sample count, every
+   nth frame. Most framing and timing mistakes show up in a 20-second preview.
+
+If something looks wrong, the fastest diagnosis is **Clear Animation**, which strips the generated
+keyframes and puts every part back to its saved assembly position, leaving you where you started.
 
 ---
 
@@ -444,7 +483,7 @@ blender -b --factory-startup --python tests/test_addon.py
 The suite builds a synthetic PCB product and drives the whole workflow: presets, saving state,
 explode, assemble, all four direction modes crossed with all three spacing modes, parented and
 rotated hierarchies, staggered sequencing, per-part overrides, exclusion, clearing animation, and
-all three camera modes, the enclosure phase and the multi viewpoint camera. Current result: **152 of 152 checks pass** on Blender 5.1.2.
+all three camera modes, the enclosure phase and the multi viewpoint camera. Current result: **165 of 165 checks pass** on Blender 5.1.2.
 
 The camera-framing tests re-derive the expected distance from the optics formula independently of
 the add-on, and check that it scales correctly with both subject size and focal length.

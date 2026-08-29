@@ -3,6 +3,17 @@
 All notable changes to Exploded Assembly Studio are documented here.
 This project follows [Semantic Versioning](https://semver.org/).
 
+## [1.5.0]
+
+### Added
+
+- **Rebuild button.** Settings only take effect on the next build, so this repeats whichever
+  animation was built last — the button reads `Rebuild Assemble` or `Rebuild Explode` — without the
+  risk of flipping the direction while tweaking. It is safe at any frame and never stacks up
+  duplicate keys, because parts are always measured from the saved assembly position rather than
+  from where they currently sit. Clearing the animation forgets what was built.
+- A "Checking it works" walkthrough in the README for validating a setup before rendering.
+
 ## [1.4.0]
 
 ### Added

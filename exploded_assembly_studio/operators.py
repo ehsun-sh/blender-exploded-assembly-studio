@@ -230,10 +230,40 @@ class EAS_OT_animate(Operator):
 
         scene.frame_set(start)
 
+        # Remember what was built so Rebuild can make the same thing again
+        # after a setting changes.
+        props.last_build_mode = self.mode
+
         verb = "Explode" if self.mode == 'EXPLODE' else "Assemble"
         extra = f", {stored} state(s) auto saved" if stored else ""
         self.report({'INFO'}, f"{verb} animation built for {count} part(s), frames {start}-{end}{extra}")
         return {'FINISHED'}
+
+
+class EAS_OT_rebuild(Operator):
+    """Build the same animation again with the current settings
+
+    Every setting is read fresh each time an animation is built, and the parts
+    are always measured from the saved assembly position rather than from where
+    they happen to be sitting. So this is safe to press at any frame, as often
+    as you like, without undoing anything first
+    """
+
+    bl_idname = "eas.rebuild"
+    bl_label = "Rebuild"
+    bl_options = {'REGISTER', 'UNDO'}
+
+    @classmethod
+    def poll(cls, context):
+        return _object_mode(context) and context.scene.eas.last_build_mode != 'NONE'
+
+    def execute(self, context):
+        props = context.scene.eas
+        mode = props.last_build_mode
+        if mode == 'NONE':
+            self.report({'ERROR'}, "Build an Explode or Assemble animation first")
+            return {'CANCELLED'}
+        return bpy.ops.eas.animate('EXEC_DEFAULT', mode=mode)
 
 
 class EAS_OT_clear_animation(Operator):
@@ -267,6 +297,8 @@ class EAS_OT_clear_animation(Operator):
 
         if self.include_camera:
             camera_module.clear_camera_animation(context)
+
+        context.scene.eas.last_build_mode = 'NONE'
 
         self.report({'INFO'}, f"Removed {removed} channel(s) and restored {len(objects)} part(s)")
         return {'FINISHED'}
@@ -805,6 +837,7 @@ CLASSES = (
     EAS_OT_clear_assembly_state,
     EAS_OT_preview,
     EAS_OT_animate,
+    EAS_OT_rebuild,
     EAS_OT_clear_animation,
     EAS_OT_auto_order,
     EAS_OT_select_parts,

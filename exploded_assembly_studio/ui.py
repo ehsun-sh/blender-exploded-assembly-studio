@@ -77,6 +77,17 @@ class EAS_PT_main(EASPanel, Panel):
         row.operator("eas.animate", text="EXPLODE", icon='MOD_EXPLODE').mode = 'EXPLODE'
         row.operator("eas.animate", text="ASSEMBLE", icon='MOD_BUILD').mode = 'ASSEMBLE'
 
+        # Changing any setting only takes effect on the next build, so the
+        # rebuild button repeats whichever of the two was built last.
+        rebuild = layout.row(align=True)
+        rebuild.scale_y = 1.3
+        if props.last_build_mode == 'NONE':
+            rebuild.enabled = False
+            rebuild.operator("eas.rebuild", text="Rebuild", icon='FILE_REFRESH')
+        else:
+            label = f"Rebuild {props.last_build_mode.title()}"
+            rebuild.operator("eas.rebuild", text=label, icon='FILE_REFRESH')
+
         row = layout.row(align=True)
         row.operator("eas.preview", text="Preview Exploded", icon='HIDE_OFF').state = 'EXPLODED'
         row.operator("eas.preview", text="Restore", icon='LOOP_BACK').state = 'ASSEMBLED'

@@ -1180,6 +1180,100 @@ def test_enclosure_camera_rules():
           f"with the rules off the front panel opens forwards again ({front.offset.y:+.4f})")
 
 
+def test_rebuild():
+    print("\n[12] Rebuild after changing a setting")
+    scene, collection, parts = build_scene()
+    props = scene.eas
+    props.source = 'COLLECTION'
+    props.collection = collection
+    props.use_camera = False
+    props.direction = 'CENTER'
+    props.magnitude = 'UNIFORM'
+    props.distance = 0.05
+    props.frame_start = 1
+    props.frame_end = 60
+
+    objects = list(collection.all_objects)
+    select(objects, active=parts['pcb'])
+    bpy.ops.eas.set_assembly_position()
+    assembled = world_matrices(objects)
+
+    check(props.last_build_mode == 'NONE', "nothing built yet")
+    try:
+        bpy.ops.eas.rebuild()
+        refused = False
+    except RuntimeError:
+        refused = True
+    check(refused, "rebuild refuses before anything has been built")
+
+    bpy.ops.eas.animate(mode='ASSEMBLE')
+    check(props.last_build_mode == 'ASSEMBLE', "the assemble build is remembered")
+
+    def travel():
+        end = at_frame(props.frame_start, objects)   # assemble starts exploded
+        return (end['Top_Case'].translation - assembled['Top_Case'].translation).length
+
+    before = travel()
+    check(close(before, 0.05, 1e-4), f"first build used distance 0.05 ({before:.4f})")
+
+    # Change a setting, then rebuild: the new value must take effect, and the
+    # animation must stay an assemble rather than flipping to an explode.
+    props.distance = 0.12
+    result = bpy.ops.eas.rebuild()
+    check(result == {'FINISHED'}, "rebuild ran")
+    after = travel()
+    check(close(after, 0.12, 1e-4), f"rebuild picked up the new distance ({after:.4f})")
+
+    start_state = at_frame(props.frame_start, objects)
+    end_state = at_frame(props.frame_end, objects)
+    check(
+        start_state['Top_Case'].translation.z > end_state['Top_Case'].translation.z,
+        "rebuild still built an assemble, not an explode",
+    )
+    worst = max(
+        max(abs(x - y) for ra, rb in zip(assembled[n], end_state[n]) for x, y in zip(ra, rb))
+        for n in assembled
+    )
+    check(worst <= TOLERANCE, f"rebuilt assemble still lands home ({worst:.3e})")
+
+    # Rebuilding from anywhere in the timeline must give the same result: the
+    # parts are measured from the saved state, not from where they sit now.
+    for frame in (1, 23, 47, 60):
+        scene.frame_set(frame)
+        bpy.context.view_layer.update()
+        bpy.ops.eas.rebuild()
+        end_state = at_frame(props.frame_end, objects)
+        worst = max(
+            max(abs(x - y) for ra, rb in zip(assembled[n], end_state[n]) for x, y in zip(ra, rb))
+            for n in assembled
+        )
+        if worst > TOLERANCE:
+            break
+    check(worst <= TOLERANCE, f"rebuilding from any frame is safe (worst {worst:.3e})")
+
+    # Repeated rebuilds must not pile up keyframes.
+    counts = []
+    for _ in range(3):
+        bpy.ops.eas.rebuild()
+        counts.append(len(key_frames(parts['top_case'])))
+    check(len(set(counts)) == 1 and counts[0] == 2,
+          f"repeated rebuilds keep exactly two keys per part ({counts})")
+
+    # Switching mode updates what rebuild will do.
+    bpy.ops.eas.animate(mode='EXPLODE')
+    check(props.last_build_mode == 'EXPLODE', "building an explode updates the memory")
+    bpy.ops.eas.rebuild()
+    start_state = at_frame(props.frame_start, objects)
+    check(
+        matrices_equal(start_state['Top_Case'], assembled['Top_Case']),
+        "rebuild now repeats the explode instead",
+    )
+
+    # Clearing forgets it again.
+    bpy.ops.eas.clear_animation()
+    check(props.last_build_mode == 'NONE', "clearing the animation forgets the last build")
+
+
 def main():
     print("=" * 72)
     print(f"Exploded Assembly Studio - headless test on Blender {bpy.app.version_string}")
@@ -1196,6 +1290,7 @@ def main():
     test_camera_multipoint()
     test_enclosure_phase()
     test_enclosure_camera_rules()
+    test_rebuild()
 
     print("\n" + "=" * 72)
     if FAILURES:

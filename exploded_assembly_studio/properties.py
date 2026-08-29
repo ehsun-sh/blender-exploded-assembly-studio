@@ -618,6 +618,16 @@ class EAS_SceneProperties(PropertyGroup):
     )
 
     # ------------------------------------------------------------------- misc
+    last_build_mode: EnumProperty(
+        name="Last Build",
+        description="Which animation was built last, so Rebuild knows what to make again",
+        items=[
+            ('NONE', "Nothing Built", "No animation has been built yet"),
+            ('EXPLODE', "Explode", "The last build was an explode animation"),
+            ('ASSEMBLE', "Assemble", "The last build was an assemble animation"),
+        ],
+        default='NONE',
+    )
     last_report: StringProperty(name="Last Report", default="")
 
 
