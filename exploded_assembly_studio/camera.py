@@ -13,7 +13,7 @@ camera's own local location, so they layer on top of the orbit.
 
 import math
 
-from mathutils import Vector
+from mathutils import Matrix, Quaternion, Vector
 
 import bpy
 
@@ -224,11 +224,9 @@ def ensure_pose_camera(context, center, radius):
     camera.rotation_mode = 'QUATERNION'
 
     distance = max(radius, 0.001) * 3.0
-    for stored, is_set in ((props.camera_pose_start, props.camera_pose_start_set),
-                           (props.camera_pose_end, props.camera_pose_end_set)):
-        if is_set:
-            pose = core.flat_to_matrix(stored)
-            distance = max(distance, (pose.translation - center).length)
+    for pose in props.camera_poses:
+        matrix = core.flat_to_matrix(pose.matrix)
+        distance = max(distance, (matrix.translation - center).length)
     _set_clipping(camera, distance)
 
     if props.camera_set_active:
@@ -304,51 +302,232 @@ def clear_camera_animation(context):
         core.clear_transform_animation(camera.data, ('lens',))
 
 
+def respace_poses(props):
+    """Spread the viewpoints evenly from the first frame to the last."""
+    count = len(props.camera_poses)
+    if count == 0:
+        return
+    if count == 1:
+        props.camera_poses[0].position = 0.0
+        return
+    for index, pose in enumerate(props.camera_poses):
+        pose.position = index / float(count - 1)
+
+
+def migrate_poses(props):
+    """Carry a 1.1/1.2 style start+end pair into the viewpoint list.
+
+    Returns True when something was migrated, so a scene saved with the old
+    two-pose camera keeps working after an update.
+    """
+    if len(props.camera_poses):
+        return False
+    if not (props.camera_pose_start_set and props.camera_pose_end_set):
+        return False
+
+    for matrix, lens in ((props.camera_pose_start, props.camera_pose_start_lens),
+                         (props.camera_pose_end, props.camera_pose_end_lens)):
+        pose = props.camera_poses.add()
+        pose.matrix = matrix
+        pose.lens = lens
+        pose.interpolation = props.camera_interpolation
+        pose.easing = props.camera_easing
+    respace_poses(props)
+    return True
+
+
 def poses_ready(props):
-    return props.camera_pose_start_set and props.camera_pose_end_set
+    if len(props.camera_poses) < 2:
+        migrate_poses(props)
+    return len(props.camera_poses) >= 2
+
+
+def camera_frame_range(props):
+    """The frames the camera actually moves over, after the start/end holds.
+
+    Holding on the first viewpoint keeps a camera move from competing with the
+    beginning of the assembly, which is the whole point of the delays.
+    """
+    low, high = core.frame_range_of(props)
+    start = float(low) + props.camera_delay_start
+    end = float(high) - props.camera_delay_end
+    if end <= start:
+        # Delays swallowed the range; keep a degenerate but valid pair.
+        middle = (float(low) + float(high)) * 0.5
+        start = min(max(start, float(low)), middle)
+        end = start + 1.0
+    return start, end
+
+
+def sorted_poses(props):
+    """Poses in play order, as (matrix, lens, position, motion, roll, interp, easing)."""
+    entries = []
+    for index, pose in enumerate(props.camera_poses):
+        entries.append({
+            'matrix': core.flat_to_matrix(pose.matrix),
+            'lens': pose.lens,
+            'position': pose.position,
+            'motion': pose.motion,
+            'roll': pose.roll,
+            'interpolation': pose.interpolation,
+            'easing': pose.easing,
+            'index': index,
+        })
+    entries.sort(key=lambda entry: (entry['position'], entry['index']))
+    return entries
+
+
+def _rolled(matrix, roll):
+    """Tilt a camera pose around its own view axis."""
+    if abs(roll) <= core.EPSILON:
+        return matrix
+    return matrix @ Matrix.Rotation(roll, 4, 'Z')
+
+
+def _arc_samples(matrix_a, matrix_b, center, count):
+    """Positions and rotations along a circular arc from one pose to another.
+
+    A straight keyframe pair always gives a straight line, so an arc has to be
+    baked: the direction from the framing centre is slerped while the radius is
+    blended, which sweeps the camera around the subject.
+    """
+    a = matrix_a.translation - center
+    b = matrix_b.translation - center
+    radius_a = a.length
+    radius_b = b.length
+
+    quat_a = matrix_a.to_quaternion()
+    quat_b = matrix_b.to_quaternion()
+
+    if radius_a <= core.EPSILON or radius_b <= core.EPSILON:
+        return None
+
+    dir_a = a.normalized()
+    dir_b = b.normalized()
+    swing = dir_a.rotation_difference(dir_b)
+
+    samples = []
+    for step in range(1, count + 1):
+        t = step / float(count + 1)
+        direction = Quaternion().slerp(swing, t) @ dir_a
+        radius = radius_a + (radius_b - radius_a) * t
+        location = center + direction * radius
+        rotation = quat_a.slerp(quat_b, t)
+        samples.append((t, location, rotation))
+    return samples
+
+
+def _key_camera(camera, matrix, frame):
+    core.apply_basis(camera, matrix)
+    camera.keyframe_insert('location', frame=frame, group="EAS Camera")
+    camera.keyframe_insert('rotation_quaternion', frame=frame, group="EAS Camera")
+
+
+def _key_pose(camera, location, rotation, frame):
+    camera.location = location
+    camera.rotation_quaternion = rotation
+    camera.keyframe_insert('location', frame=frame, group="EAS Camera")
+    camera.keyframe_insert('rotation_quaternion', frame=frame, group="EAS Camera")
 
 
 def animate_poses(context, center, radius, reverse=False):
-    """Move the camera between the two poses captured from the viewport."""
+    """Move the camera along the captured viewpoints."""
     props = context.scene.eas
     if not poses_ready(props):
         return None
 
     camera = ensure_pose_camera(context, center, radius)
-    start, end = core.frame_range_of(props)
+    start, end = camera_frame_range(props)
+    span = end - start
 
-    pose_start = core.flat_to_matrix(props.camera_pose_start)
-    pose_end = core.flat_to_matrix(props.camera_pose_end)
-    lens_start = props.camera_pose_start_lens
-    lens_end = props.camera_pose_end_lens
+    entries = sorted_poses(props)
     if reverse:
-        pose_start, pose_end = pose_end, pose_start
-        lens_start, lens_end = lens_end, lens_start
+        entries = list(reversed(entries))
+        # Mirroring flips the path, so the segment settings have to shift with
+        # it: each segment keeps the motion of the pose it now leaves.
+        motions = [entry['motion'] for entry in entries]
+        rolls = [entry['roll'] for entry in entries]
+        interps = [(entry['interpolation'], entry['easing']) for entry in entries]
+        for index, entry in enumerate(entries):
+            entry['position'] = 1.0 - entry['position']
+            entry['roll'] = rolls[index]
+            source = min(index + 1, len(entries) - 1)
+            entry['motion'] = motions[source]
+            entry['interpolation'], entry['easing'] = interps[source]
+
+    frames = [start + entry['position'] * span for entry in entries]
+    # Guarantee a strictly increasing timeline even if two poses share a time.
+    for index in range(1, len(frames)):
+        frames[index] = max(frames[index], frames[index - 1] + 1.0)
 
     core.clear_transform_animation(camera, CAMERA_PATHS)
     core.clear_transform_animation(camera.data, ('lens',))
 
+    matrices = [_rolled(entry['matrix'], entry['roll']) for entry in entries]
+
     # Quaternion channels so the orientation blends the short way round
     # instead of unwinding through euler gimbal.
-    for matrix, frame in ((pose_start, start), (pose_end, end)):
-        core.apply_basis(camera, matrix)
-        camera.keyframe_insert('location', frame=frame, group="EAS Camera")
-        camera.keyframe_insert('rotation_quaternion', frame=frame, group="EAS Camera")
+    for matrix, frame in zip(matrices, frames):
+        _key_camera(camera, matrix, frame)
 
-    if props.camera_animate_focal and abs(lens_start - lens_end) > 1e-4:
-        for lens, frame in ((lens_start, start), (lens_end, end)):
+    arc_frames = set()
+    for index in range(len(entries) - 1):
+        if entries[index]['motion'] != 'ARC':
+            continue
+        frame_a = frames[index]
+        frame_b = frames[index + 1]
+        gap = frame_b - frame_a
+        count = int(gap // max(props.camera_arc_samples, 1)) - 1
+        if count < 1:
+            continue
+        samples = _arc_samples(matrices[index], matrices[index + 1], center, count)
+        if samples is None:
+            continue
+        interpolation = entries[index]['interpolation']
+        easing = entries[index]['easing']
+        for t, location, rotation in samples:
+            # Easing is baked into where each sample lands in time, so the
+            # curve shape survives the linear interpolation between samples.
+            eased = core.evaluate_easing(t, interpolation, easing)
+            frame = frame_a + gap * eased
+            _key_pose(camera, location, rotation, frame)
+            arc_frames.add(round(frame, 4))
+
+    _apply_segment_interpolation(camera, entries, frames, arc_frames)
+
+    lenses = [entry['lens'] for entry in entries]
+    if props.camera_animate_focal and max(lenses) - min(lenses) > 1e-4:
+        for lens, frame in zip(lenses, frames):
             camera.data.lens = lens
             camera.data.keyframe_insert('lens', frame=frame, group="EAS Camera")
-        core.apply_interpolation(
-            camera.data, props.camera_interpolation, props.camera_easing, ('lens',)
-        )
+        _apply_segment_interpolation(camera.data, entries, frames, set(), ('lens',))
     else:
-        camera.data.lens = lens_start
+        camera.data.lens = lenses[0]
 
-    core.apply_interpolation(
-        camera, props.camera_interpolation, props.camera_easing, CAMERA_PATHS
-    )
     return camera
+
+
+def _apply_segment_interpolation(target, entries, frames, arc_frames, paths=CAMERA_PATHS):
+    """Give each keyframe the interpolation of the segment that leaves it.
+
+    Keys baked along an arc are already positioned in time to carry their
+    easing, so they interpolate linearly between one another.
+    """
+    lookup = {}
+    for entry, frame in zip(entries, frames):
+        lookup[round(frame, 4)] = (entry['interpolation'], entry['easing'])
+
+    for curve in core.iter_fcurves(target, paths):
+        for keyframe in curve.keyframe_points:
+            key = round(keyframe.co.x, 4)
+            if key in arc_frames:
+                keyframe.interpolation = 'LINEAR'
+                continue
+            interpolation, easing = lookup.get(key, ('BEZIER', 'AUTO'))
+            keyframe.interpolation = interpolation
+            if interpolation not in {'CONSTANT', 'LINEAR', 'BEZIER'}:
+                keyframe.easing = easing
+        curve.update()
 
 
 def animate(context, center, radius, reverse=False):
@@ -363,7 +542,7 @@ def animate(context, center, radius, reverse=False):
 
     pivot, target, camera, distance = ensure_rig(context, center, radius)
 
-    start, end = core.frame_range_of(props)
+    start, end = camera_frame_range(props)
     scale = max(radius, 0.001)
 
     angle_start = props.camera_start_angle

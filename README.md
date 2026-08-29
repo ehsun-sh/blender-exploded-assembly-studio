@@ -5,7 +5,7 @@ both ways — explode and assemble — with an optional camera move. It is aimed
 visualisation for electronics and mechanical hardware: PCBs and enclosures, housings, gearboxes,
 network gear, anything that comes apart into layers.
 
-**Version 1.2.0** · tested on **Blender 5.1.2** · minimum **Blender 4.2** (extension install) or
+**Version 1.3.0** · tested on **Blender 5.1.2** · minimum **Blender 4.2** (extension install) or
 **Blender 3.0** (legacy add-on install)
 
 ```text
@@ -26,6 +26,7 @@ Assembled model  →  Explode animation  →  Exploded view  →  Assemble anima
   - [Explosion](#explosion)
   - [Rotation](#rotation)
   - [Sequence](#sequence)
+  - [Enclosure](#enclosure)
   - [Animation](#animation)
   - [Camera](#camera)
   - [Active Part](#active-part)
@@ -76,7 +77,7 @@ Build the installable zip:
 python build.py
 ```
 
-That produces `dist/exploded_assembly_studio-1.2.0.zip`.
+That produces `dist/exploded_assembly_studio-1.3.0.zip`.
 
 **Blender 4.2 and newer (recommended)**
 `Edit → Preferences → Get Extensions → ▼ → Install from Disk…` and pick the zip.
@@ -197,6 +198,35 @@ Staggered timing, so parts move one after another instead of all at once.
 | Mirror Order On Assemble | The assemble pass plays the order backwards, so parts leave outermost-first and return outermost-last |
 | Bake Order To Parts | Write the computed order onto the objects and switch to Manual so you can hand-edit it |
 
+### Enclosure
+
+For a product in a shell, the parts and the case want different treatment. Tag them and the add-on
+animates them as two phases:
+
+```text
+ASSEMBLE:   components land on the board   →   pause   →   shell closes in from every side
+EXPLODE:    shell opens outwards           →   pause   →   parts come off the board
+```
+
+1. Select the shell panels → **Mark Enclosure**. (The opposite button puts them back to parts.)
+2. **Detect Sides** works out which way each panel opens from where it sits — a lid above the product
+   reads as Top, a panel out to the left reads as Left. Only the sides your product actually has get
+   used, so a case with just a top and a bottom gets exactly those two.
+3. Build the animation.
+
+Enclosure panels ignore the global explode direction and travel along their own side instead, which
+is what makes a six-sided case open outwards like a box rather than fanning along one axis.
+
+| Option | What it does |
+|---|---|
+| Parts Share | How much of the frame range the parts phase gets; the shell gets the rest |
+| Phase Gap | A pause between the phases, so the parts settle before the shell closes |
+| Shell Distance | Extra travel for panels, so the case clears the parts inside it |
+
+Any panel can be overridden in **Active Part → Side**. That covers the case where the automatic
+guess is right but the shot is not: a front panel can be told to come down from above instead of
+sliding in from the front.
+
 ### Animation
 
 Start and end frame, interpolation (Bezier, Linear, Sine, Quadratic, Cubic, Exponential, Back,
@@ -213,7 +243,17 @@ part that does not have one yet, so a first-time explode works even if you forge
 
 ### Camera
 
-Three modes.
+#### Holding still at each end
+
+`Hold Start` and `Hold End` keep the camera parked for a number of frames before it starts moving
+and after it arrives. This matters more than it sounds: a camera that starts moving on frame 1
+competes with the parts for attention, and the beginning of the assembly gets lost. Holding for the
+first 10–20 frames lets the viewer watch the parts land, then the camera takes over.
+
+The parts always keep the full frame range — only the camera waits. The panel shows the frames the
+camera actually moves over.
+
+#### The three modes
 
 #### 1. Orbit — automatic, frames the whole exploded model
 
@@ -261,11 +301,31 @@ part belongs in the finished product even if it flies off during the animation.
 
 #### 3. From Viewport — you hand it the framing
 
-Instead of numbers, capture the first and last camera framing straight from the viewport:
+Instead of numbers, capture the camera path straight from the viewport, one viewpoint at a time:
 
-1. Frame the opening shot in the viewport → **Set Start From View**
-2. Frame the closing shot → **Set End From View**
-3. Build the animation — the camera travels between the two.
+1. Frame the opening shot in the viewport → **Add From View**
+2. Frame the next one → **Add From View** again. Repeat for as many as you want; two behaves like a
+   simple A-to-B move.
+3. Build the animation — the camera travels through the viewpoints in time order.
+
+The list shows each viewpoint with the frame it lands on, its focal length and the motion leaving it.
+The buttons beside it add, remove and reorder; the ↻ button re-captures the active viewpoint from the
+current view, and 👁 sends the viewport to it.
+
+Each viewpoint carries its own settings:
+
+| Setting | What it does |
+|---|---|
+| Time | Where it sits in the camera move, `0` first frame, `1` last. **Space Evenly** resets them |
+| Focal Length | Captured with the view; blended along the path when `Animate Focal Length` is on |
+| Roll | Tilts the camera around its own view axis at this viewpoint |
+| Motion | How the camera travels to the **next** viewpoint: `Linear` or `Arc` |
+| Interpolation / Easing | Timing of the segment leaving this viewpoint |
+
+**Arc** curves the camera around the subject instead of cutting straight across. A plain pair of
+keyframes always gives a straight line, so an arc is baked as sampled keys along the circle — the
+segment's easing is folded into where each sample lands in time, so the timing curve survives the
+baking. `Arc Quality` sets how many frames apart those samples are.
 
 Both of these work:
 
@@ -276,8 +336,7 @@ Both of these work:
 
 Notes:
 
-- The 👁 button next to each pose sends the viewport back to it so you can check or adjust.
-- **Focal length is captured too.** Grab the first pose at 35 mm and the last at 85 mm and, with
+- **Focal length is captured too.** Grab the first viewpoint at 35 mm and the last at 85 mm and, with
   `Animate Focal Length` on, the lens blends across the shot.
 - Rotation is keyed on the quaternion channel so the camera turns the short way between the two
   orientations instead of unwinding through euler gimbal.
@@ -354,7 +413,7 @@ blender -b --factory-startup --python tests/test_addon.py
 The suite builds a synthetic PCB product and drives the whole workflow: presets, saving state,
 explode, assemble, all four direction modes crossed with all three spacing modes, parented and
 rotated hierarchies, staggered sequencing, per-part overrides, exclusion, clearing animation, and
-all three camera modes. Current result: **102 of 102 checks pass** on Blender 5.1.2.
+all three camera modes, the enclosure phase and the multi viewpoint camera. Current result: **140 of 140 checks pass** on Blender 5.1.2.
 
 The camera-framing tests re-derive the expected distance from the optics formula independently of
 the add-on, and check that it scales correctly with both subject size and focal length.

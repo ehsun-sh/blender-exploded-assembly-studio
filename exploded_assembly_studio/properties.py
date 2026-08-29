@@ -7,6 +7,7 @@ Nothing here touches mesh, material or origin data (see spec section 19).
 import bpy
 from bpy.props import (
     BoolProperty,
+    CollectionProperty,
     EnumProperty,
     FloatProperty,
     FloatVectorProperty,
@@ -81,6 +82,28 @@ EASING_ITEMS = [
     ('EASE_IN_OUT', "Ease In Out", "Slow start and end"),
 ]
 
+ROLE_ITEMS = [
+    ('PART', "Part", "An inner component. Parts move first when assembling", 'MESH_DATA', 0),
+    ('ENCLOSURE', "Enclosure", "A shell panel. Enclosure panels close over the product after the "
+                               "parts have landed", 'MESH_CUBE', 1),
+]
+
+#: Enclosure sides and the world direction each one opens towards.
+SIDE_ITEMS = [
+    ('AUTO', "Auto", "Work the side out from where the panel sits in the product"),
+    ('TOP', "Top", "Opens upwards, +Z"),
+    ('BOTTOM', "Bottom", "Opens downwards, -Z"),
+    ('FRONT', "Front", "Opens towards the front, -Y"),
+    ('BACK', "Back", "Opens towards the back, +Y"),
+    ('RIGHT', "Right", "Opens to the right, +X"),
+    ('LEFT', "Left", "Opens to the left, -X"),
+]
+
+MOTION_ITEMS = [
+    ('LINEAR', "Linear", "Travel straight to the next viewpoint"),
+    ('ARC', "Arc", "Curve around the subject on the way to the next viewpoint"),
+]
+
 
 def _subject_poll(self, obj):
     """Only offer objects that can actually be framed."""
@@ -89,8 +112,77 @@ def _subject_poll(self, obj):
     return obj.type not in {'CAMERA', 'LIGHT', 'SPEAKER', 'LIGHT_PROBE'}
 
 
+class EAS_CameraPose(PropertyGroup):
+    """One captured camera viewpoint on the camera path.
+
+    ``motion``, ``roll``, ``interpolation`` and ``easing`` describe the segment
+    that *leaves* this pose, so the last pose's segment settings are unused.
+    """
+
+    matrix: FloatVectorProperty(
+        name="Matrix",
+        description="Captured camera world matrix, row major",
+        size=16,
+        default=IDENTITY_16,
+    )
+    lens: FloatProperty(
+        name="Focal Length",
+        description="Focal length captured with this viewpoint",
+        default=50.0,
+        min=1.0,
+    )
+    position: FloatProperty(
+        name="Time",
+        description="Where this viewpoint sits in the camera move. 0 is the first frame, 1 the last",
+        default=0.0,
+        min=0.0,
+        max=1.0,
+        subtype='FACTOR',
+    )
+    motion: EnumProperty(
+        name="Motion",
+        description="How the camera travels from this viewpoint to the next one",
+        items=MOTION_ITEMS,
+        default='LINEAR',
+    )
+    roll: FloatProperty(
+        name="Roll",
+        description="Tilt the camera around its own view axis at this viewpoint",
+        default=0.0,
+        subtype='ANGLE',
+        soft_min=-3.14159,
+        soft_max=3.14159,
+    )
+    interpolation: EnumProperty(
+        name="Interpolation",
+        description="Timing curve of the segment leaving this viewpoint",
+        items=INTERPOLATION_ITEMS,
+        default='SINE',
+    )
+    easing: EnumProperty(
+        name="Easing",
+        description="Easing of the segment leaving this viewpoint",
+        items=EASING_ITEMS,
+        default='EASE_IN_OUT',
+    )
+
+
 class EAS_ObjectProperties(PropertyGroup):
     """Per object assembly data. Stored in the .blend so it survives reloads."""
+
+    role: EnumProperty(
+        name="Role",
+        description="Whether this object is an inner part or a shell panel",
+        items=ROLE_ITEMS,
+        default='PART',
+    )
+    side: EnumProperty(
+        name="Side",
+        description="Which way this enclosure panel opens. Set it by hand to override the automatic "
+                    "guess, for instance to bring a front panel down from above instead",
+        items=SIDE_ITEMS,
+        default='AUTO',
+    )
 
     has_state: BoolProperty(
         name="Has Assembly State",
@@ -262,6 +354,39 @@ class EAS_SceneProperties(PropertyGroup):
         subtype='FACTOR',
     )
 
+    # ------------------------------------------------------- enclosure phase
+    use_phases: BoolProperty(
+        name="Enclosure Closes Last",
+        description="Split the animation in two: the inner parts land on the board first, then the "
+                    "enclosure panels close over them. Explode runs it the other way round, opening "
+                    "the shell before the parts come out",
+        default=False,
+    )
+    parts_share: FloatProperty(
+        name="Parts Share",
+        description="How much of the frame range the parts phase gets. The enclosure phase gets the rest",
+        default=0.6,
+        min=0.05,
+        max=0.95,
+        subtype='FACTOR',
+    )
+    phase_gap: FloatProperty(
+        name="Phase Gap",
+        description="A pause between the two phases, as a fraction of the frame range. A small gap "
+                    "lets the parts settle before the shell closes",
+        default=0.05,
+        min=0.0,
+        max=0.5,
+        subtype='FACTOR',
+    )
+    enclosure_distance_factor: FloatProperty(
+        name="Enclosure Distance",
+        description="Extra travel for enclosure panels, so the shell clears the parts inside it",
+        default=1.5,
+        min=0.0,
+        soft_max=5.0,
+    )
+
     # -------------------------------------------------------------- animation
     frame_start: IntProperty(
         name="Start Frame",
@@ -340,6 +465,33 @@ class EAS_SceneProperties(PropertyGroup):
         name="End Pose", size=16, default=IDENTITY_16,
         description="Captured camera matrix for the last frame",
     )
+    #: The camera path. Two poses behave exactly like the old start/end pair.
+    camera_poses: CollectionProperty(type=EAS_CameraPose)
+    camera_pose_index: IntProperty(name="Active Viewpoint", default=0, min=0)
+
+    camera_delay_start: IntProperty(
+        name="Hold Start",
+        description="Frames to hold on the first viewpoint before the camera starts moving, so the "
+                    "beginning of the assembly is not competing with a camera move",
+        default=0,
+        min=0,
+        soft_max=120,
+    )
+    camera_delay_end: IntProperty(
+        name="Hold End",
+        description="Frames to hold on the last viewpoint after the camera has arrived",
+        default=0,
+        min=0,
+        soft_max=120,
+    )
+    camera_arc_samples: IntProperty(
+        name="Arc Quality",
+        description="Frames between sampled keys on an arc segment. Lower is smoother and heavier",
+        default=3,
+        min=1,
+        max=20,
+    )
+
     camera_pose_start_set: BoolProperty(name="Start Pose Captured", default=False)
     camera_pose_end_set: BoolProperty(name="End Pose Captured", default=False)
     camera_pose_start_lens: FloatProperty(name="Start Focal Length", default=50.0, min=1.0)
@@ -451,6 +603,7 @@ class EAS_SceneProperties(PropertyGroup):
 
 
 CLASSES = (
+    EAS_CameraPose,
     EAS_ObjectProperties,
     EAS_SceneProperties,
 )

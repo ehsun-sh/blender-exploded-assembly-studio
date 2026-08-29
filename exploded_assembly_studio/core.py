@@ -35,6 +35,41 @@ AXIS_VECTORS = {
     'Z': Vector((0.0, 0.0, 1.0)),
 }
 
+#: Outward direction of each enclosure side, in Blender's world axes.
+SIDE_VECTORS = {
+    'TOP': Vector((0.0, 0.0, 1.0)),
+    'BOTTOM': Vector((0.0, 0.0, -1.0)),
+    'FRONT': Vector((0.0, -1.0, 0.0)),
+    'BACK': Vector((0.0, 1.0, 0.0)),
+    'RIGHT': Vector((1.0, 0.0, 0.0)),
+    'LEFT': Vector((-1.0, 0.0, 0.0)),
+}
+
+#: Order the sides are offered and auto-detected in.
+SIDE_ORDER = ('TOP', 'BOTTOM', 'FRONT', 'BACK', 'RIGHT', 'LEFT')
+
+
+def detect_side(offset):
+    """Pick the enclosure side a panel sitting at ``offset`` from the centre faces.
+
+    The dominant axis of the offset wins, so a lid above the product reads as
+    TOP and a panel out to the left reads as LEFT.
+    """
+    components = (
+        (abs(offset.z), 'TOP' if offset.z >= 0.0 else 'BOTTOM'),
+        (abs(offset.y), 'BACK' if offset.y >= 0.0 else 'FRONT'),
+        (abs(offset.x), 'RIGHT' if offset.x >= 0.0 else 'LEFT'),
+    )
+    return max(components, key=lambda item: item[0])[1]
+
+
+def resolved_side(obj, offset):
+    """The side an enclosure panel opens towards, resolving AUTO."""
+    side = obj.eas.side
+    if side == 'AUTO':
+        return detect_side(offset)
+    return side
+
 
 # ---------------------------------------------------------------------------
 # matrix helpers
@@ -361,9 +396,18 @@ def _rank_group(pairs, tolerance):
         previous = key
 
 
+def is_enclosure(props, obj):
+    """True when the enclosure feature is on and this object is a shell panel."""
+    return props.use_phases and obj.eas.role == 'ENCLOSURE'
+
+
 def _direction_for(props, part, center, axis, band):
     mode = props.direction
     delta = part.center - center
+
+    # A shell panel opens along its own side, whatever the global direction is.
+    if is_enclosure(props, part.obj):
+        return SIDE_VECTORS[resolved_side(part.obj, delta)].copy()
 
     if mode == 'WORLD_AXIS':
         return axis.copy()
@@ -388,6 +432,11 @@ def _direction_for(props, part, center, axis, band):
 
 def _magnitude_for(props, part, center, max_radius):
     base = props.distance
+
+    if is_enclosure(props, part.obj):
+        # Shell panels get a flat, larger travel so they clear the parts inside
+        # instead of being spread by the layering rules meant for components.
+        return base * props.enclosure_distance_factor * part.obj.eas.distance_multiplier
 
     if props.magnitude == 'PROPORTIONAL':
         if max_radius <= EPSILON:
@@ -448,12 +497,84 @@ def order_parts(context, parts, reverse=False):
 
     if props.reverse_order:
         ordered.reverse()
+
+    if props.use_phases:
+        # Explode opens the shell before the parts come out; the mirror below
+        # then makes Assemble land the parts first and close the shell last.
+        ordered.sort(key=lambda part: 0 if is_enclosure(props, part.obj) else 1)
+
     if reverse:
         ordered.reverse()
 
     for index, part in enumerate(ordered):
         part.sequence = index
     return ordered
+
+
+def split_phases(props, ordered):
+    """Split an ordered part list into the contiguous role runs it already has.
+
+    Returns a list of (parts, is_enclosure) in play order; a single group when
+    phases are off or every part shares one role.
+    """
+    if not props.use_phases or not ordered:
+        return [(ordered, False)]
+
+    groups = []
+    for part in ordered:
+        flag = is_enclosure(props, part.obj)
+        if groups and groups[-1][1] == flag:
+            groups[-1][0].append(part)
+        else:
+            groups.append(([part], flag))
+    return [(items, flag) for items, flag in groups]
+
+
+def build_timing(props, ordered):
+    """Frame range for every part, honouring the enclosure phase split.
+
+    Returns a dict keyed by object name so callers do not depend on ordering.
+    """
+    low, high = frame_range_of(props)
+    low = float(low)
+    high = float(high)
+    groups = split_phases(props, ordered)
+
+    if len(groups) < 2:
+        parts = groups[0][0] if groups else []
+        return {
+            part.obj.name: _staggered(index, len(parts), low, high, props)
+            for index, part in enumerate(parts)
+        }
+
+    # Two phases: parts get their share of the range, the shell gets the rest,
+    # with an optional pause between them.
+    span = max(high - low, 0.0)
+    gap = span * props.phase_gap
+    usable = max(span - gap, 0.0)
+    first_is_enclosure = groups[0][1]
+    share = props.parts_share
+    first_len = usable * ((1.0 - share) if first_is_enclosure else share)
+    second_len = usable - first_len
+
+    timing = {}
+    bounds = [(low, low + first_len), (low + first_len + gap, low + first_len + gap + second_len)]
+    for (parts, _flag), (group_low, group_high) in zip(groups, bounds):
+        for index, part in enumerate(parts):
+            timing[part.obj.name] = _staggered(index, len(parts), group_low, group_high, props)
+    return timing
+
+
+def _staggered(index, count, low, high, props):
+    """Stagger one part inside a frame window."""
+    if not props.use_sequence or count <= 1 or high <= low:
+        return low, high
+    overlap = min(max(props.overlap, 0.0), 0.999)
+    span = high - low
+    segment = span / (count - (count - 1) * overlap)
+    step = segment * (1.0 - overlap)
+    part_start = low + index * step
+    return part_start, min(part_start + segment, high)
 
 
 def part_timing(index, count, props):
@@ -547,6 +668,57 @@ def key_transform(obj, frame, rotate=False, group=None):
     obj.keyframe_insert(data_path='location', frame=frame, group=group)
     if rotate:
         obj.keyframe_insert(data_path=rotation_data_path(obj), frame=frame, group=group)
+
+
+def _ease_in(t, interpolation):
+    """The ease-in half of each interpolation curve, on t in [0, 1]."""
+    if interpolation == 'LINEAR':
+        return t
+    if interpolation == 'SINE':
+        return 1.0 - math.cos(t * math.pi * 0.5)
+    if interpolation == 'QUAD':
+        return t * t
+    if interpolation == 'CUBIC' or interpolation == 'BEZIER':
+        return t * t * t
+    if interpolation == 'EXPO':
+        return 0.0 if t <= 0.0 else math.pow(2.0, 10.0 * (t - 1.0))
+    if interpolation == 'BACK':
+        overshoot = 1.70158
+        return t * t * ((overshoot + 1.0) * t - overshoot)
+    if interpolation == 'ELASTIC':
+        if t <= 0.0 or t >= 1.0:
+            return t
+        period = 0.3
+        return -math.pow(2.0, 10.0 * (t - 1.0)) * math.sin(
+            (t - 1.0 - period / 4.0) * (2.0 * math.pi) / period
+        )
+    return t
+
+
+def evaluate_easing(t, interpolation, easing):
+    """Map linear time to eased time, matching Blender's F-curve shapes.
+
+    Arc segments are baked as sampled keyframes, so the easing has to be
+    applied to the sample spacing rather than left to the F-curve.
+    """
+    t = min(max(t, 0.0), 1.0)
+    if interpolation == 'LINEAR':
+        return t
+    if interpolation == 'BEZIER':
+        # Blender's default bezier handles read as a smooth ease in and out.
+        return t * t * (3.0 - 2.0 * t)
+
+    direction = easing
+    if direction == 'AUTO':
+        direction = 'EASE_IN_OUT'
+
+    if direction == 'EASE_IN':
+        return _ease_in(t, interpolation)
+    if direction == 'EASE_OUT':
+        return 1.0 - _ease_in(1.0 - t, interpolation)
+    if t < 0.5:
+        return _ease_in(t * 2.0, interpolation) * 0.5
+    return 1.0 - _ease_in((1.0 - t) * 2.0, interpolation) * 0.5
 
 
 def frame_range_of(props):

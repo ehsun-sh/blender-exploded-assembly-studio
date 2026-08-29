@@ -3,6 +3,34 @@
 All notable changes to Exploded Assembly Studio are documented here.
 This project follows [Semantic Versioning](https://semver.org/).
 
+## [1.3.0]
+
+### Added
+
+- **Camera hold.** `Hold Start` and `Hold End` keep the camera still for a number of frames at each
+  end of the shot, so the beginning of the assembly is not competing with a camera move. The parts
+  keep the full frame range; only the camera waits.
+- **Multiple camera viewpoints.** The From Viewport mode now takes any number of viewpoints instead
+  of just a start and an end, managed in a list: add from the current view, update, reorder, remove,
+  look through, or space evenly. Each viewpoint carries its own time, focal length and roll.
+- **Per segment motion.** The move between two viewpoints can be `Linear` or `Arc`. An arc curves
+  around the subject rather than cutting the chord, which a plain keyframe pair cannot do — it is
+  baked as sampled keys, with the segment's easing folded into where each sample lands in time so
+  the timing curve survives. Interpolation and easing are set per segment.
+- **Roll** per viewpoint, tilting the camera around its own view axis.
+- **Enclosure panels as a separate phase.** Objects can be marked as `Part` or `Enclosure`. Enclosure
+  panels open along their own side — top, bottom, front, back, left, right — instead of following the
+  global explode direction, and they move in their own phase: on Assemble the inner parts land first
+  and the shell closes over them, on Explode the shell opens before the parts come out.
+  `Detect Sides` works each panel's side out from where it sits, and any panel can be overridden by
+  hand to enter from a different side. `Parts Share`, `Phase Gap` and `Shell Distance` control the
+  split.
+
+### Changed
+
+- A scene saved with the old two-pose camera is migrated into the viewpoint list on first use, so
+  existing files keep working.
+
 ## [1.2.0]
 
 ### Fixed

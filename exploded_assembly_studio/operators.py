@@ -1,7 +1,7 @@
 """Operators for Exploded Assembly Studio."""
 
 import bpy
-from bpy.props import BoolProperty, EnumProperty
+from bpy.props import BoolProperty, EnumProperty, IntProperty
 from bpy.types import Operator
 
 from . import camera as camera_module
@@ -17,7 +17,7 @@ def _object_mode(context):
 def _camera_not_ready(props):
     """Why the camera cannot be built yet, or an empty string when it can."""
     if props.camera_mode == 'POSES' and not camera_module.poses_ready(props):
-        return "capture a start and an end view in the Camera panel first"
+        return "capture at least two viewpoints in the Camera panel first"
     if props.camera_mode == 'SUBJECT' and props.camera_subject is None:
         return "pick the object to frame in the Camera panel first"
     return ""
@@ -173,6 +173,7 @@ class EAS_OT_animate(Operator):
                 core.clear_transform_animation(part.obj)
 
         start, end = core.frame_range_of(props)
+        timing = core.build_timing(props, ordered)
 
         for part in ordered:
             obj = part.obj
@@ -181,7 +182,7 @@ class EAS_OT_animate(Operator):
             else:
                 first, last = part.basis_exploded, part.basis_assembled
 
-            part_start, part_end = core.part_timing(part.sequence, count, props)
+            part_start, part_end = timing[obj.name]
 
             core.apply_basis(obj, first)
             core.key_transform(obj, part_start, rotate, ANIMATION_GROUP)
@@ -486,19 +487,20 @@ class EAS_OT_camera_use_active_subject(Operator):
 
 
 class EAS_OT_camera_capture_pose(Operator):
-    """Store the current viewport framing as the start or end pose of the camera move"""
+    """Capture the current viewport framing as a camera viewpoint"""
 
     bl_idname = "eas.camera_capture_pose"
-    bl_label = "Capture View"
+    bl_label = "Add Viewpoint From View"
     bl_options = {'REGISTER', 'UNDO'}
 
-    which: EnumProperty(
-        name="Pose",
+    mode: EnumProperty(
+        name="Mode",
         items=[
-            ('START', "Start", "Framing at the first frame"),
-            ('END', "End", "Framing at the last frame"),
+            ('APPEND', "Add", "Add a new viewpoint at the end of the path"),
+            ('INSERT', "Insert After Active", "Add a new viewpoint after the active one"),
+            ('REPLACE', "Update Active", "Re-capture the active viewpoint from this view"),
         ],
-        default='START',
+        default='APPEND',
     )
 
     @classmethod
@@ -513,16 +515,28 @@ class EAS_OT_camera_capture_pose(Operator):
             return {'CANCELLED'}
 
         matrix, focal, is_perspective = captured
-        flat = core.matrix_to_flat(matrix)
+        poses = props.camera_poses
 
-        if self.which == 'START':
-            props.camera_pose_start = flat
-            props.camera_pose_start_lens = focal
-            props.camera_pose_start_set = True
+        if self.mode == 'REPLACE':
+            if not len(poses):
+                self.report({'ERROR'}, "No viewpoint to update yet")
+                return {'CANCELLED'}
+            index = min(props.camera_pose_index, len(poses) - 1)
+            pose = poses[index]
         else:
-            props.camera_pose_end = flat
-            props.camera_pose_end_lens = focal
-            props.camera_pose_end_set = True
+            pose = poses.add()
+            index = len(poses) - 1
+            if self.mode == 'INSERT' and len(poses) > 1:
+                index = min(props.camera_pose_index + 1, len(poses) - 1)
+                poses.move(len(poses) - 1, index)
+                pose = poses[index]
+
+        pose.matrix = core.matrix_to_flat(matrix)
+        pose.lens = focal
+        props.camera_pose_index = index
+
+        if self.mode != 'REPLACE':
+            camera_module.respace_poses(props)
 
         # Capturing a view is a clear statement of intent about the camera.
         props.camera_mode = 'POSES'
@@ -531,29 +545,21 @@ class EAS_OT_camera_capture_pose(Operator):
         if not is_perspective:
             self.report(
                 {'WARNING'},
-                f"{self.which.title()} pose captured from an orthographic view, "
-                "the rendered framing will differ",
+                "Viewpoint captured from an orthographic view, the rendered framing will differ",
             )
         else:
-            self.report({'INFO'}, f"{self.which.title()} pose captured at {focal:.0f} mm")
+            self.report({'INFO'}, f"Viewpoint {index + 1} of {len(poses)} at {focal:.0f} mm")
         return {'FINISHED'}
 
 
 class EAS_OT_camera_view_pose(Operator):
-    """Point the viewport at a captured pose so you can check or adjust it"""
+    """Point the viewport at a captured viewpoint so you can check or adjust it"""
 
     bl_idname = "eas.camera_view_pose"
-    bl_label = "Look Through Pose"
+    bl_label = "Look Through Viewpoint"
     bl_options = {'REGISTER'}
 
-    which: EnumProperty(
-        name="Pose",
-        items=[
-            ('START', "Start", "Framing at the first frame"),
-            ('END', "End", "Framing at the last frame"),
-        ],
-        default='START',
-    )
+    index: IntProperty(name="Viewpoint", default=-1)
 
     @classmethod
     def poll(cls, context):
@@ -561,35 +567,197 @@ class EAS_OT_camera_view_pose(Operator):
 
     def execute(self, context):
         props = context.scene.eas
-        if self.which == 'START':
-            stored, is_set, focal = props.camera_pose_start, props.camera_pose_start_set, props.camera_pose_start_lens
-        else:
-            stored, is_set, focal = props.camera_pose_end, props.camera_pose_end_set, props.camera_pose_end_lens
-
-        if not is_set:
-            self.report({'ERROR'}, f"No {self.which.lower()} pose captured yet")
+        poses = props.camera_poses
+        index = self.index if self.index >= 0 else props.camera_pose_index
+        if not len(poses) or index >= len(poses):
+            self.report({'ERROR'}, "No such viewpoint")
             return {'CANCELLED'}
 
-        if not camera_module.look_through_pose(context, core.flat_to_matrix(stored), focal):
+        pose = poses[index]
+        if not camera_module.look_through_pose(
+            context, core.flat_to_matrix(pose.matrix), pose.lens
+        ):
             self.report({'ERROR'}, "Run this from a 3D viewport")
             return {'CANCELLED'}
 
-        self.report({'INFO'}, f"Viewport moved to the {self.which.lower()} pose")
+        props.camera_pose_index = index
+        self.report({'INFO'}, f"Viewport moved to viewpoint {index + 1}")
+        return {'FINISHED'}
+
+
+class EAS_OT_camera_pose_remove(Operator):
+    """Remove the active camera viewpoint"""
+
+    bl_idname = "eas.camera_pose_remove"
+    bl_label = "Remove Viewpoint"
+    bl_options = {'REGISTER', 'UNDO'}
+
+    @classmethod
+    def poll(cls, context):
+        return len(context.scene.eas.camera_poses) > 0
+
+    def execute(self, context):
+        props = context.scene.eas
+        index = min(props.camera_pose_index, len(props.camera_poses) - 1)
+        props.camera_poses.remove(index)
+        props.camera_pose_index = max(0, min(index, len(props.camera_poses) - 1))
+        camera_module.respace_poses(props)
+        self.report({'INFO'}, f"{len(props.camera_poses)} viewpoint(s) left")
+        return {'FINISHED'}
+
+
+class EAS_OT_camera_pose_move(Operator):
+    """Move the active viewpoint earlier or later in the camera path"""
+
+    bl_idname = "eas.camera_pose_move"
+    bl_label = "Move Viewpoint"
+    bl_options = {'REGISTER', 'UNDO'}
+
+    direction: EnumProperty(
+        name="Direction",
+        items=[('UP', "Up", "Earlier"), ('DOWN', "Down", "Later")],
+        default='UP',
+    )
+
+    @classmethod
+    def poll(cls, context):
+        return len(context.scene.eas.camera_poses) > 1
+
+    def execute(self, context):
+        props = context.scene.eas
+        poses = props.camera_poses
+        index = min(props.camera_pose_index, len(poses) - 1)
+        target = index - 1 if self.direction == 'UP' else index + 1
+        if target < 0 or target >= len(poses):
+            return {'CANCELLED'}
+
+        poses.move(index, target)
+        props.camera_pose_index = target
+        camera_module.respace_poses(props)
+        return {'FINISHED'}
+
+
+class EAS_OT_camera_respace_poses(Operator):
+    """Spread the viewpoints evenly across the camera move"""
+
+    bl_idname = "eas.camera_respace_poses"
+    bl_label = "Space Evenly"
+    bl_options = {'REGISTER', 'UNDO'}
+
+    @classmethod
+    def poll(cls, context):
+        return len(context.scene.eas.camera_poses) > 1
+
+    def execute(self, context):
+        camera_module.respace_poses(context.scene.eas)
+        self.report({'INFO'}, "Viewpoints spaced evenly")
         return {'FINISHED'}
 
 
 class EAS_OT_camera_clear_poses(Operator):
-    """Forget the captured camera poses"""
+    """Forget every captured camera viewpoint"""
 
     bl_idname = "eas.camera_clear_poses"
-    bl_label = "Clear Captured Poses"
+    bl_label = "Clear Viewpoints"
     bl_options = {'REGISTER', 'UNDO'}
 
     def execute(self, context):
         props = context.scene.eas
+        props.camera_poses.clear()
+        props.camera_pose_index = 0
         props.camera_pose_start_set = False
         props.camera_pose_end_set = False
-        self.report({'INFO'}, "Captured poses cleared")
+        self.report({'INFO'}, "Viewpoints cleared")
+        return {'FINISHED'}
+
+
+class EAS_OT_mark_role(Operator):
+    """Mark the selected objects as inner parts or as enclosure panels"""
+
+    bl_idname = "eas.mark_role"
+    bl_label = "Mark Role"
+    bl_options = {'REGISTER', 'UNDO'}
+
+    role: EnumProperty(
+        name="Role",
+        items=[
+            ('PART', "Part", "Inner component"),
+            ('ENCLOSURE', "Enclosure", "Shell panel"),
+        ],
+        default='ENCLOSURE',
+    )
+
+    @classmethod
+    def poll(cls, context):
+        return _object_mode(context) and bool(context.selected_objects)
+
+    def execute(self, context):
+        props = context.scene.eas
+        targets = [
+            obj for obj in context.selected_objects
+            if obj.type not in core.SKIPPED_TYPES and not obj.eas.is_rig
+        ]
+        if not targets:
+            self.report({'ERROR'}, "Select the objects to mark first")
+            return {'CANCELLED'}
+
+        for obj in targets:
+            obj.eas.role = self.role
+
+        if self.role == 'ENCLOSURE':
+            props.use_phases = True
+
+        label = "enclosure panel" if self.role == 'ENCLOSURE' else "part"
+        self.report({'INFO'}, f"Marked {len(targets)} object(s) as {label}")
+        return {'FINISHED'}
+
+
+class EAS_OT_detect_sides(Operator):
+    """Work out which way each enclosure panel opens and write it onto the objects"""
+
+    bl_idname = "eas.detect_sides"
+    bl_label = "Detect Sides"
+    bl_options = {'REGISTER', 'UNDO'}
+
+    mark_selected: BoolProperty(
+        name="Mark Selected As Enclosure",
+        description="Also mark the selected objects as enclosure panels before detecting",
+        default=False,
+    )
+
+    @classmethod
+    def poll(cls, context):
+        return _object_mode(context)
+
+    def execute(self, context):
+        props = context.scene.eas
+
+        if self.mark_selected:
+            for obj in context.selected_objects:
+                if obj.type not in core.SKIPPED_TYPES and not obj.eas.is_rig:
+                    obj.eas.role = 'ENCLOSURE'
+            props.use_phases = True
+
+        parts, _ = core.build_parts(context)
+        if not parts:
+            self.report({'ERROR'}, _no_parts_message(props))
+            return {'CANCELLED'}
+
+        center = core.assembly_center(context, parts)
+        found = []
+        for part in parts:
+            if part.obj.eas.role != 'ENCLOSURE':
+                continue
+            side = core.detect_side(part.center - center)
+            part.obj.eas.side = side
+            found.append(f"{part.obj.name}: {side.title()}")
+
+        if not found:
+            self.report({'WARNING'}, "No objects are marked as enclosure panels yet")
+            return {'CANCELLED'}
+
+        props.use_phases = True
+        self.report({'INFO'}, f"Detected {len(found)} side(s) - " + ", ".join(found[:4]))
         return {'FINISHED'}
 
 
@@ -626,8 +794,13 @@ CLASSES = (
     EAS_OT_camera_use_active_subject,
     EAS_OT_camera_capture_pose,
     EAS_OT_camera_view_pose,
+    EAS_OT_camera_pose_remove,
+    EAS_OT_camera_pose_move,
+    EAS_OT_camera_respace_poses,
     EAS_OT_camera_clear_poses,
     EAS_OT_camera_delete,
+    EAS_OT_mark_role,
+    EAS_OT_detect_sides,
 )
 
 

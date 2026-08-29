@@ -14,7 +14,7 @@ import os
 import sys
 
 import bpy
-from mathutils import Vector
+from mathutils import Matrix, Vector
 
 PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if PROJECT_ROOT not in sys.path:
@@ -96,7 +96,10 @@ def world_matrices(objects):
 
 
 def at_frame(frame, objects):
-    bpy.context.scene.frame_set(frame)
+    # Viewpoints can land on fractional frames, which frame_set only reaches
+    # through its subframe argument.
+    whole = int(frame // 1)
+    bpy.context.scene.frame_set(whole, subframe=float(frame) - whole)
     bpy.context.view_layer.update()
     return {obj.name: obj.matrix_world.copy() for obj in objects}
 
@@ -687,6 +690,351 @@ def test_subject_framing():
     check(props.camera_subject == pcb, "PCB preset framed the active object")
 
 
+def build_box_scene():
+    """A product with a six sided shell around a board, for enclosure tests."""
+    scene, collection, parts = build_scene()
+    # Six shell panels around the existing stack.
+    panels = {
+        "Shell_Top": ((0.130, 0.090, 0.004), (0.0, 0.0, 0.030)),
+        "Shell_Bottom": ((0.130, 0.090, 0.004), (0.0, 0.0, -0.030)),
+        "Shell_Front": ((0.130, 0.004, 0.060), (0.0, -0.045, 0.0)),
+        "Shell_Back": ((0.130, 0.004, 0.060), (0.0, 0.045, 0.0)),
+        "Shell_Right": ((0.004, 0.090, 0.060), (0.065, 0.0, 0.0)),
+        "Shell_Left": ((0.004, 0.090, 0.060), (-0.065, 0.0, 0.0)),
+    }
+    for name, (size, location) in panels.items():
+        parts[name] = add_box(name, size, location, collection)
+    return scene, collection, parts
+
+
+def key_frames(obj, path='location'):
+    from exploded_assembly_studio import core
+    curves = core.iter_fcurves(obj, (path,))
+    return sorted({round(kp.co.x, 3) for curve in curves for kp in curve.keyframe_points})
+
+
+def test_camera_delay():
+    print("\n[8] Camera hold at the start and end")
+    from exploded_assembly_studio import camera as camera_module
+
+    scene, collection, parts = build_scene()
+    props = scene.eas
+    props.source = 'COLLECTION'
+    props.collection = collection
+    props.direction = 'CENTER'
+    props.distance = 0.05
+    props.frame_start = 1
+    props.frame_end = 60
+
+    objects = list(collection.all_objects)
+    select(objects, active=parts['pcb'])
+    bpy.ops.eas.set_assembly_position()
+
+    props.use_camera = True
+    props.camera_mode = 'ORBIT'
+    props.camera_delay_start = 10
+    props.camera_delay_end = 5
+
+    start, end = camera_module.camera_frame_range(props)
+    check(close(start, 11.0) and close(end, 55.0), f"camera range shrinks to {start:.0f}-{end:.0f}")
+
+    bpy.ops.eas.animate(mode='ASSEMBLE')
+    pivot = props.camera_pivot
+    frames = key_frames(pivot, 'rotation_euler')
+    check(frames and close(frames[0], 11.0), f"first camera key is held to frame 11 ({frames})")
+    check(frames and close(frames[-1], 55.0), f"last camera key lands on frame 55 ({frames})")
+
+    # The camera must genuinely sit still through the hold.
+    cam = props.camera_object
+    at_1 = at_frame(1, [cam])[cam.name].translation.copy()
+    at_11 = at_frame(11, [cam])[cam.name].translation.copy()
+    at_55 = at_frame(55, [cam])[cam.name].translation.copy()
+    at_60 = at_frame(60, [cam])[cam.name].translation.copy()
+    check((at_1 - at_11).length < 1e-6, "camera is still through the opening hold")
+    check((at_55 - at_60).length < 1e-6, "camera is still through the closing hold")
+    check((at_11 - at_55).length > 1e-4, "camera still moves in between")
+
+    # The parts keep the full range; only the camera is held.
+    part_frames = key_frames(parts['top_case'])
+    check(close(part_frames[0], 1.0), f"parts still start on frame 1 ({part_frames})")
+
+    # A silly delay must not produce an inverted range.
+    props.camera_delay_start = 100
+    props.camera_delay_end = 100
+    start, end = camera_module.camera_frame_range(props)
+    check(end > start, f"absurd delays still give a valid range ({start:.0f}-{end:.0f})")
+    props.camera_delay_start = 0
+    props.camera_delay_end = 0
+
+
+def test_camera_multipoint():
+    print("\n[9] Multiple camera viewpoints, arcs and roll")
+    import math as _math
+    from exploded_assembly_studio import camera as camera_module
+    from exploded_assembly_studio import core
+
+    scene, collection, parts = build_scene()
+    props = scene.eas
+    props.source = 'COLLECTION'
+    props.collection = collection
+    props.direction = 'CENTER'
+    props.distance = 0.05
+    props.frame_start = 1
+    props.frame_end = 101
+
+    objects = list(collection.all_objects)
+    select(objects, active=parts['pcb'])
+    bpy.ops.eas.set_assembly_position()
+
+    props.use_camera = True
+    props.camera_mode = 'POSES'
+    props.camera_poses.clear()
+
+    center = Vector((0.0, 0.0, 0.0))
+
+    def look_at(eye):
+        direction = Vector(eye) - center
+        rotation = direction.to_track_quat('Z', 'Y')
+        m = rotation.to_matrix().to_4x4()
+        m.translation = Vector(eye)
+        return m
+
+    # Four viewpoints on a circle of radius 0.5 around the product.
+    eyes = [
+        (0.0, -0.5, 0.15),
+        (0.5, 0.0, 0.15),
+        (0.0, 0.5, 0.15),
+        (-0.5, 0.0, 0.15),
+    ]
+    for eye in eyes:
+        pose = props.camera_poses.add()
+        pose.matrix = core.matrix_to_flat(look_at(eye))
+        pose.lens = 50.0
+        pose.motion = 'LINEAR'
+        pose.interpolation = 'LINEAR'
+    camera_module.respace_poses(props)
+
+    check(len(props.camera_poses) == 4, "four viewpoints stored")
+    positions = [round(p.position, 3) for p in props.camera_poses]
+    check(positions == [0.0, 0.333, 0.667, 1.0], f"spaced evenly {positions}")
+    check(camera_module.poses_ready(props), "four viewpoints count as ready")
+
+    bpy.ops.eas.animate(mode='ASSEMBLE')
+    cam = props.camera_object
+    frames = key_frames(cam)
+    check(len(frames) == 4, f"one key per viewpoint ({frames})")
+    check(close(frames[0], 1.0) and close(frames[-1], 101.0), f"path spans the range ({frames})")
+
+    # Sample at the exact key frames, not the rounded ones a listing gives:
+    # a third of a thousandth of a frame is enough drift to blur the check.
+    cam_start, cam_end = camera_module.camera_frame_range(props)
+    exact_frames = [cam_start + p.position * (cam_end - cam_start) for p in props.camera_poses]
+
+    # Each viewpoint must be reproduced at its own frame.
+    worst = 0.0
+    for pose, frame in zip(props.camera_poses, exact_frames):
+        actual = at_frame(frame, [cam])[cam.name]
+        expected = core.flat_to_matrix(pose.matrix)
+        worst = max(worst, max(abs(x - y) for ra, rb in zip(actual, expected) for x, y in zip(ra, rb)))
+    check(worst < 1e-5, f"every viewpoint is hit exactly (err {worst:.2e})")
+
+    # ---- arc ------------------------------------------------------------
+    mid_frame = (exact_frames[0] + exact_frames[1]) * 0.5
+    linear_mid = at_frame(mid_frame, [cam])[cam.name].translation.copy()
+    linear_radius = (linear_mid - center).length
+
+    props.camera_poses[0].motion = 'ARC'
+    bpy.ops.eas.animate(mode='ASSEMBLE')
+    arc_frames = key_frames(cam)
+    check(len(arc_frames) > 4, f"arc bakes intermediate keys ({len(arc_frames)} keys)")
+
+    arc_mid = at_frame(mid_frame, [cam])[cam.name].translation.copy()
+    arc_radius = (arc_mid - center).length
+    # The eyes sit at z=0.15 on a 0.5 ring, so the real orbit radius is 0.522.
+    capture_radius = (Vector(eyes[0]) - center).length
+    check(
+        arc_radius > linear_radius + 1e-3,
+        f"arc bulges out to the orbit radius ({arc_radius:.4f} vs chord {linear_radius:.4f})",
+    )
+    check(
+        close(arc_radius, capture_radius, 0.01),
+        f"arc keeps the capture radius ({arc_radius:.4f} vs {capture_radius:.4f})",
+    )
+
+    # The arc must still land exactly on both of its endpoints.
+    ends_err = 0.0
+    for index in (0, 1):
+        actual = at_frame(exact_frames[index], [cam])[cam.name]
+        expected = core.flat_to_matrix(props.camera_poses[index].matrix)
+        ends_err = max(ends_err, max(abs(x - y) for ra, rb in zip(actual, expected)
+                                     for x, y in zip(ra, rb)))
+    check(ends_err < 1e-5, f"arc endpoints still exact (err {ends_err:.2e})")
+    props.camera_poses[0].motion = 'LINEAR'
+
+    # ---- roll -----------------------------------------------------------
+    props.camera_poses[1].roll = _math.radians(30.0)
+    bpy.ops.eas.animate(mode='ASSEMBLE')
+    actual = at_frame(exact_frames[1], [cam])[cam.name]
+    expected = core.flat_to_matrix(props.camera_poses[1].matrix) @ Matrix.Rotation(
+        _math.radians(30.0), 4, 'Z'
+    )
+    err = max(abs(x - y) for ra, rb in zip(actual, expected) for x, y in zip(ra, rb))
+    check(err < 1e-5, f"roll tilts the camera around its view axis (err {err:.2e})")
+    props.camera_poses[1].roll = 0.0
+
+    # ---- per viewpoint timing -------------------------------------------
+    # Moving a viewpoint late in time also moves it later in the path, since
+    # the camera plays the viewpoints in time order rather than list order.
+    props.camera_poses[1].position = 0.8
+    bpy.ops.eas.animate(mode='ASSEMBLE')
+    moved = key_frames(cam)
+    check(any(close(f, 81.0, 0.6) for f in moved), f"viewpoint time moves its key ({moved})")
+    check(moved == sorted(moved), "the path stays in time order")
+    camera_module.respace_poses(props)
+
+    # ---- reverse keeps the path in order ---------------------------------
+    props.camera_mirror_on_assemble = True
+    bpy.ops.eas.animate(mode='ASSEMBLE')
+    first = at_frame(1, [cam])[cam.name]
+    last_pose = core.flat_to_matrix(props.camera_poses[-1].matrix)
+    err = max(abs(x - y) for ra, rb in zip(first, last_pose) for x, y in zip(ra, rb))
+    check(err < 1e-5, "mirrored path starts on the last viewpoint")
+    props.camera_mirror_on_assemble = False
+
+    # ---- one viewpoint is not a move -------------------------------------
+    while len(props.camera_poses) > 1:
+        props.camera_poses.remove(1)
+    check(not camera_module.poses_ready(props), "a single viewpoint is not enough")
+    result = bpy.ops.eas.animate(mode='ASSEMBLE')
+    check(result == {'FINISHED'}, "explode still succeeds with one viewpoint")
+
+
+def test_enclosure_phase():
+    print("\n[10] Enclosure panels and the two phase build")
+    from exploded_assembly_studio import core
+
+    scene, collection, parts = build_box_scene()
+    props = scene.eas
+    props.source = 'COLLECTION'
+    props.collection = collection
+    props.use_camera = False
+    props.direction = 'AXIS_SPLIT'
+    props.axis = 'Z'
+    props.magnitude = 'LAYERED'
+    props.center_mode = 'ACTIVE'
+    props.distance = 0.03
+    props.frame_start = 1
+    props.frame_end = 100
+    props.use_sequence = True
+    props.overlap = 0.8
+
+    objects = list(collection.all_objects)
+    select(objects, active=parts['pcb'])
+    bpy.ops.eas.set_assembly_position()
+    assembled = world_matrices(objects)
+
+    shells = [obj for name, obj in parts.items() if name.startswith("Shell_")]
+    select(shells, active=shells[0])
+    result = bpy.ops.eas.mark_role(role='ENCLOSURE')
+    check(result == {'FINISHED'}, "panels marked as enclosure")
+    check(props.use_phases, "marking enclosure turns the phase split on")
+
+    select(objects, active=parts['pcb'])
+    result = bpy.ops.eas.detect_sides()
+    check(result == {'FINISHED'}, "sides detected")
+
+    expected_sides = {
+        "Shell_Top": 'TOP', "Shell_Bottom": 'BOTTOM', "Shell_Front": 'FRONT',
+        "Shell_Back": 'BACK', "Shell_Right": 'RIGHT', "Shell_Left": 'LEFT',
+    }
+    wrong = [f"{n}={parts[n].eas.side}" for n, s in expected_sides.items() if parts[n].eas.side != s]
+    check(not wrong, f"every panel found its own side ({wrong})")
+
+    # Each panel must travel along its own side and nowhere else.
+    bpy.ops.eas.animate(mode='EXPLODE')
+    exploded = at_frame(props.frame_end, objects)
+    axis_of = {
+        "Shell_Top": (2, 1), "Shell_Bottom": (2, -1), "Shell_Front": (1, -1),
+        "Shell_Back": (1, 1), "Shell_Right": (0, 1), "Shell_Left": (0, -1),
+    }
+    bad = []
+    for name, (index, sign) in axis_of.items():
+        delta = exploded[name].translation - assembled[name].translation
+        along = delta[index] * sign
+        sideways = max(abs(delta[i]) for i in range(3) if i != index)
+        if along < 1e-4 or sideways > 1e-6:
+            bad.append(f"{name} {tuple(round(v, 4) for v in delta)}")
+    check(not bad, f"panels open straight out along their own side ({bad})")
+
+    # Shell distance factor.
+    props.enclosure_distance_factor = 3.0
+    bpy.ops.eas.animate(mode='EXPLODE')
+    far = at_frame(props.frame_end, objects)
+    travel = (far["Shell_Top"].translation - assembled["Shell_Top"].translation).length
+    check(close(travel, props.distance * 3.0, 1e-5), f"shell distance factor applied ({travel:.4f})")
+    props.enclosure_distance_factor = 1.5
+
+    # Manual override: bring the front panel down from above instead.
+    parts["Shell_Front"].eas.side = 'TOP'
+    bpy.ops.eas.animate(mode='EXPLODE')
+    overridden = at_frame(props.frame_end, objects)
+    delta = overridden["Shell_Front"].translation - assembled["Shell_Front"].translation
+    check(delta.z > 1e-4 and abs(delta.y) < 1e-6, f"manual side override respected ({tuple(round(v,4) for v in delta)})")
+    parts["Shell_Front"].eas.side = 'AUTO'
+
+    # ---- phase timing ----------------------------------------------------
+    props.parts_share = 0.6
+    props.phase_gap = 0.1
+    bpy.ops.eas.animate(mode='ASSEMBLE')
+
+    part_objects = [o for o in objects if o.eas.role == 'PART']
+    shell_objects = [o for o in objects if o.eas.role == 'ENCLOSURE']
+    last_part = max(key_frames(o)[-1] for o in part_objects if key_frames(o))
+    first_shell = min(key_frames(o)[0] for o in shell_objects if key_frames(o))
+    check(
+        first_shell >= last_part - 1e-6,
+        f"on assemble the shell only starts after the parts land ({last_part:.1f} -> {first_shell:.1f})",
+    )
+    check(
+        first_shell - last_part > 5.0,
+        f"the phase gap leaves a real pause ({first_shell - last_part:.1f} frames)",
+    )
+
+    # Explode runs it the other way: the shell opens first.
+    bpy.ops.eas.animate(mode='EXPLODE')
+    last_shell = max(key_frames(o)[-1] for o in shell_objects if key_frames(o))
+    first_part = min(key_frames(o)[0] for o in part_objects if key_frames(o))
+    check(
+        first_part >= last_shell - 1e-6,
+        f"on explode the shell opens before the parts leave ({last_shell:.1f} -> {first_part:.1f})",
+    )
+
+    # And the round trip still lands exactly home.
+    bpy.ops.eas.animate(mode='ASSEMBLE')
+    home = at_frame(props.frame_end, objects)
+    worst = max(
+        max(abs(x - y) for ra, rb in zip(assembled[n], home[n]) for x, y in zip(ra, rb))
+        for n in assembled
+    )
+    check(worst <= TOLERANCE, f"enclosure build returns every part home (error {worst:.3e})")
+
+    # Turning the feature off drops the side based direction. The front panel
+    # straddles the split plane, so under plain Axis +/- it stops moving at all
+    # instead of opening forwards.
+    bpy.ops.eas.animate(mode='EXPLODE')
+    with_phase = at_frame(props.frame_end, objects)
+    forward = with_phase["Shell_Front"].translation.y - assembled["Shell_Front"].translation.y
+    check(forward < -1e-4, f"with the phase on, the front panel opens forwards ({forward:+.4f})")
+
+    props.use_phases = False
+    bpy.ops.eas.animate(mode='EXPLODE')
+    plain = at_frame(props.frame_end, objects)
+    delta = plain["Shell_Front"].translation - assembled["Shell_Front"].translation
+    check(abs(delta.y) < 1e-6, f"with the phase off, the side direction is gone ({delta.y:+.4f})")
+    top_delta = plain["Shell_Top"].translation - assembled["Shell_Top"].translation
+    check(top_delta.z > 1e-4, "and the global direction drives the panels again")
+
+
 def main():
     print("=" * 72)
     print(f"Exploded Assembly Studio - headless test on Blender {bpy.app.version_string}")
@@ -699,6 +1047,9 @@ def main():
     test_selection_source()
     test_camera_poses()
     test_subject_framing()
+    test_camera_delay()
+    test_camera_multipoint()
+    test_enclosure_phase()
 
     print("\n" + "=" * 72)
     if FAILURES:

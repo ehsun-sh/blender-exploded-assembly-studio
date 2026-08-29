@@ -1,7 +1,7 @@
 """Sidebar panels for Exploded Assembly Studio (3D Viewport, N panel)."""
 
 import bpy
-from bpy.types import Panel
+from bpy.types import Panel, UIList
 
 from . import camera, core
 
@@ -17,6 +17,25 @@ def format_length(context, value):
         )
     except (RuntimeError, ValueError, TypeError):
         return f"{value:.3f}"
+
+
+class EAS_UL_camera_poses(UIList):
+    """The camera path, one row per captured viewpoint."""
+
+    def draw_item(self, context, layout, data, item, icon, active_data, active_prop, index):
+        props = context.scene.eas
+        start, end = camera.camera_frame_range(props)
+        frame = start + item.position * (end - start)
+        is_last = index == len(props.camera_poses) - 1
+
+        row = layout.row(align=True)
+        row.label(text=f"{index + 1}", icon='CON_CAMERASOLVER')
+        row.label(text=f"f{frame:.0f}")
+        row.label(text=f"{item.lens:.0f}mm")
+        if is_last:
+            row.label(text="end")
+        else:
+            row.label(text=item.motion.title())
 
 
 class EASPanel:
@@ -151,6 +170,57 @@ class EAS_PT_sequence(EASPanel, Panel):
         column.operator("eas.auto_order", icon='SORTSIZE')
 
 
+class EAS_PT_enclosure(EASPanel, Panel):
+    bl_idname = "EAS_PT_enclosure"
+    bl_parent_id = "EAS_PT_main"
+    bl_label = "Enclosure"
+    bl_options = {'DEFAULT_CLOSED'}
+
+    def draw_header(self, context):
+        self.layout.prop(context.scene.eas, "use_phases", text="")
+
+    def draw(self, context):
+        layout = self.layout
+        props = context.scene.eas
+
+        block = layout.column()
+        block.active = props.use_phases
+
+        info = block.column(align=True)
+        info.scale_y = 0.85
+        info.label(text="Parts land first, then the shell", icon='INFO')
+        info.label(text="closes over them from each side.")
+
+        block.separator()
+        row = block.row(align=True)
+        row.operator("eas.mark_role", text="Mark Enclosure", icon='MESH_CUBE').role = 'ENCLOSURE'
+        row.operator("eas.mark_role", text="Mark Part", icon='MESH_DATA').role = 'PART'
+        block.operator("eas.detect_sides", text="Detect Sides", icon='ORIENTATION_NORMAL')
+
+        settings = block.column()
+        settings.use_property_split = True
+        settings.separator()
+        settings.prop(props, "parts_share")
+        settings.prop(props, "phase_gap")
+        settings.prop(props, "enclosure_distance_factor", text="Shell Distance")
+
+        # Summarise what is currently tagged, so the split is not a mystery.
+        objects = core.collect_objects(context)
+        panels = [obj for obj in objects if obj.eas.role == 'ENCLOSURE']
+        if panels:
+            summary = block.box().column(align=True)
+            summary.scale_y = 0.85
+            summary.label(text=f"{len(panels)} panel(s), {len(objects) - len(panels)} part(s)")
+            for obj in panels[:8]:
+                side = obj.eas.side
+                label = side.title() if side != 'AUTO' else "Auto"
+                summary.label(text=f"{obj.name}  -  {label}")
+            if len(panels) > 8:
+                summary.label(text=f"and {len(panels) - 8} more")
+        elif props.use_phases:
+            block.label(text="Nothing marked as enclosure yet", icon='ERROR')
+
+
 class EAS_PT_animation(EASPanel, Panel):
     bl_idname = "EAS_PT_animation"
     bl_parent_id = "EAS_PT_main"
@@ -243,38 +313,72 @@ class EAS_PT_camera(EASPanel, Panel):
 
     def draw_poses(self, context, column, props):
         space = context.space_data
+        poses = props.camera_poses
 
         block = column.column()
         block.use_property_split = False
 
-        block.label(text="Frame the shot, then capture it:", icon='INFO')
+        if not len(poses):
+            block.label(text="Frame the shot, then capture it:", icon='INFO')
 
-        for which, stored, focal in (
-            ('START', props.camera_pose_start_set, props.camera_pose_start_lens),
-            ('END', props.camera_pose_end_set, props.camera_pose_end_lens),
-        ):
-            row = block.row(align=True)
-            label = "Set Start From View" if which == 'START' else "Set End From View"
-            row.operator("eas.camera_capture_pose", text=label,
-                         icon='KEYTYPE_KEYFRAME_VEC' if stored else 'KEYFRAME').which = which
-            look = row.row(align=True)
-            look.enabled = stored
-            look.operator("eas.camera_view_pose", text="", icon='HIDE_OFF').which = which
-            if stored:
-                block.label(text=f"    captured, {focal:.0f} mm", icon='CHECKMARK')
-            else:
-                block.label(text="    not captured yet", icon='BLANK1')
+        row = block.row()
+        row.template_list(
+            "EAS_UL_camera_poses", "", props, "camera_poses",
+            props, "camera_pose_index", rows=3,
+        )
+        side = row.column(align=True)
+        side.operator("eas.camera_capture_pose", text="", icon='ADD').mode = 'APPEND'
+        side.operator("eas.camera_pose_remove", text="", icon='REMOVE')
+        side.separator()
+        side.operator("eas.camera_pose_move", text="", icon='TRIA_UP').direction = 'UP'
+        side.operator("eas.camera_pose_move", text="", icon='TRIA_DOWN').direction = 'DOWN'
 
-        block.separator()
+        row = block.row(align=True)
+        row.operator("eas.camera_capture_pose", text="Add From View", icon='KEYFRAME_HLT').mode = 'APPEND'
+        sub = row.row(align=True)
+        sub.enabled = bool(len(poses))
+        sub.operator("eas.camera_capture_pose", text="", icon='FILE_REFRESH').mode = 'REPLACE'
+        sub.operator("eas.camera_view_pose", text="", icon='HIDE_OFF').index = -1
+
         if space is not None and space.type == 'VIEW_3D':
             row = block.row(align=True)
             row.operator("view3d.view_camera", text="Camera View", icon='CAMERA_DATA')
             row.prop(space, "lock_camera", text="Lock To View", toggle=True)
 
-        block.operator("eas.camera_clear_poses", text="Clear Poses", icon='X')
+        row = block.row(align=True)
+        row.operator("eas.camera_respace_poses", text="Space Evenly", icon='MOD_ARRAY')
+        row.operator("eas.camera_clear_poses", text="", icon='X')
+
+        if len(poses) == 1:
+            block.label(text="Add one more viewpoint to build a move", icon='ERROR')
+
+        # ---- settings for the active viewpoint -----------------------------
+        if len(poses):
+            index = min(props.camera_pose_index, len(poses) - 1)
+            pose = poses[index]
+            is_last = index == len(poses) - 1
+
+            box = column.box().column()
+            box.use_property_split = True
+            box.label(text=f"Viewpoint {index + 1}", icon='CON_CAMERASOLVER')
+            box.prop(pose, "position", text="Time")
+            box.prop(pose, "lens", text="Focal Length")
+            box.prop(pose, "roll")
+
+            segment = box.column()
+            segment.enabled = not is_last
+            segment.separator()
+            segment.label(text="Segment To Next" if not is_last else "Last viewpoint")
+            segment.prop(pose, "motion")
+            segment.prop(pose, "interpolation")
+            easing_row = segment.row()
+            easing_row.active = pose.interpolation not in {'LINEAR', 'BEZIER'}
+            easing_row.prop(pose, "easing")
 
         column.separator()
         column.prop(props, "camera_animate_focal")
+        if any(p.motion == 'ARC' for p in poses):
+            column.prop(props, "camera_arc_samples")
 
     def draw(self, context):
         layout = self.layout
@@ -298,10 +402,22 @@ class EAS_PT_camera(EASPanel, Panel):
             self.draw_orbit(context, column, props)
 
         column.separator()
-        column.prop(props, "camera_interpolation", text="Interpolation")
-        row = column.row()
-        row.active = props.camera_interpolation not in {'LINEAR', 'BEZIER'}
-        row.prop(props, "camera_easing", text="Easing")
+        hold = column.column(align=True)
+        hold.prop(props, "camera_delay_start", text="Hold Start")
+        hold.prop(props, "camera_delay_end", text="Hold End")
+        start, end = camera.camera_frame_range(props)
+        low, high = core.frame_range_of(props)
+        if props.camera_delay_start or props.camera_delay_end:
+            column.label(text=f"Camera moves frames {start:.0f} - {end:.0f} of {low}-{high}",
+                         icon='TIME')
+
+        column.separator()
+        # Per viewpoint timing replaces these in From Viewport mode.
+        if props.camera_mode != 'POSES':
+            column.prop(props, "camera_interpolation", text="Interpolation")
+            row = column.row()
+            row.active = props.camera_interpolation not in {'LINEAR', 'BEZIER'}
+            row.prop(props, "camera_easing", text="Easing")
         column.prop(props, "camera_mirror_on_assemble", text="Mirror On Assemble")
         column.prop(props, "camera_set_active")
 
@@ -337,6 +453,11 @@ class EAS_PT_part(EASPanel, Panel):
 
         layout.label(text=obj.name, icon='OBJECT_DATA')
         settings = obj.eas
+        layout.prop(settings, "role")
+        if settings.role == 'ENCLOSURE':
+            layout.prop(settings, "side")
+            if settings.side == 'AUTO':
+                layout.label(text="Side worked out from its position", icon='INFO')
         layout.prop(settings, "distance_multiplier")
         layout.prop(settings, "order")
         layout.prop(settings, "exclude")
@@ -370,11 +491,13 @@ class EAS_PT_hierarchy(EASPanel, Panel):
 
 
 CLASSES = (
+    EAS_UL_camera_poses,
     EAS_PT_main,
     EAS_PT_presets,
     EAS_PT_explosion,
     EAS_PT_rotation,
     EAS_PT_sequence,
+    EAS_PT_enclosure,
     EAS_PT_animation,
     EAS_PT_camera,
     EAS_PT_part,
