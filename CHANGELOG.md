@@ -3,6 +3,28 @@
 All notable changes to Exploded Assembly Studio are documented here.
 This project follows [Semantic Versioning](https://semver.org/).
 
+## [1.10.2]
+
+### Fixed
+
+- **A hidden source collection now names the exact switch hiding it.** "Hidden or excluded" covers
+  three different controls in three different places in the Outliner — the exclude checkbox, the eye
+  icon and the monitor icon — and a parent collection can be the one responsible, so the row to click
+  may not be the one you are looking at. The message now names the collection and the control, and
+  distinguishes those from objects hidden one by one.
+
+### Added
+
+- **Use Hidden Objects** button, offered in the Source box whenever nothing could be collected. It
+  turns off `Visible Only` in one click. Hiding a heavy assembly for viewport performance is
+  reasonable and should not have to be undone before animating it: only transforms and keyframes are
+  written, and neither needs an object to be visible.
+
+### Notes
+
+Measured on a 2315 object assembly, the size of a real ECAD import: Set Assembly Position 0.01 s,
+first build 0.31 s, rebuild 0.37 s, clear 0.14 s.
+
 ## [1.10.1]
 
 ### Fixed

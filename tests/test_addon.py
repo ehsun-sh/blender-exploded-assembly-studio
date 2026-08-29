@@ -1925,8 +1925,8 @@ def test_source_diagnostics():
     message = detect_error()
     check(collection.name in message,
           f"the message names the source collection ({message[:60]})")
-    check("hidden or excluded" in message, "and says they are hidden or excluded")
-    check("Visible Only" in message, "and points at the setting that overrides it")
+    check("invisible because" in message, "and says they are invisible")
+    check("Use Hidden Objects" in message, "and points at the one click workaround")
 
     # The source is fine but the panels are excluded.
     scene, collection, shell, parts = fresh()
@@ -1985,6 +1985,91 @@ def test_source_diagnostics():
           f"an excluded panel is reported as hidden ({len(hidden)} hidden, {len(outside)} outside)")
 
 
+def test_hidden_sources():
+    print("\n[19] Naming the switch that hides a collection")
+    from exploded_assembly_studio import core
+
+    def layer_for(name, layer=None):
+        layer = layer or bpy.context.view_layer.layer_collection
+        if layer.collection.name == name:
+            return layer
+        for child in layer.children:
+            found = layer_for(name, child)
+            if found:
+                return found
+        return None
+
+    def fresh():
+        scene, collection, parts = build_scene()
+        props = scene.eas
+        props.source = 'COLLECTION'
+        props.collection = collection
+        props.visible_only = True
+        props.use_camera = False
+        props.direction = 'WORLD_AXIS'
+        props.axis = 'Z'
+        props.distance = 0.05
+        select(list(collection.all_objects), active=parts['pcb'])
+        return scene, collection, parts
+
+    # Each of the three outliner controls must be named distinctly, because
+    # each one is clicked in a different place.
+    cases = [
+        ("checkbox", lambda scene, coll: setattr(layer_for(coll.name), "exclude", True)),
+        ("eye icon", lambda scene, coll: setattr(layer_for(coll.name), "hide_viewport", True)),
+        ("monitor icon", lambda scene, coll: setattr(coll, "hide_viewport", True)),
+    ]
+    for expected, apply in cases:
+        scene, collection, parts = fresh()
+        apply(scene, collection)
+        message = core.source_report(bpy.context)
+        check(expected in message, f"'{expected}' named in the message ({message[:70]})")
+        check(collection.name in message, f"and the collection named too ({expected})")
+
+    # Individually hidden objects are a fourth, different situation.
+    scene, collection, parts = fresh()
+    for obj in collection.all_objects:
+        obj.hide_set(True)
+    message = core.source_report(bpy.context)
+    check("one by one" in message, f"per object hiding is named ({message[:70]})")
+
+    # ---- and the one click escape hatch ------------------------------------
+    scene, collection, parts = fresh()
+    layer_for(collection.name).exclude = True
+    check(not core.collect_objects(bpy.context), "nothing collected while excluded")
+
+    result = bpy.ops.eas.use_hidden_objects()
+    check(result == {'FINISHED'}, "Use Hidden Objects ran")
+    check(not scene.eas.visible_only, "it turned Visible Only off")
+    recovered = core.collect_objects(bpy.context)
+    check(len(recovered) == len(collection.all_objects),
+          f"and every hidden part is back in range ({len(recovered)})")
+
+    # The whole workflow has to work on objects that are still hidden: only
+    # transforms and keyframes are written, and neither needs visibility.
+    objects = list(collection.all_objects)
+    bpy.ops.object.select_all(action='SELECT')
+    bpy.ops.eas.set_assembly_position()
+    assembled = world_matrices(objects)
+    result = bpy.ops.eas.animate(mode='ASSEMBLE')
+    check(result == {'FINISHED'}, "an excluded assembly still animates")
+
+    end = at_frame(scene.eas.frame_end, objects)
+    worst = max(
+        max(abs(x - y) for ra, rb in zip(assembled[n], end[n]) for x, y in zip(ra, rb))
+        for n in assembled
+    )
+    check(worst <= TOLERANCE, f"and still lands home exactly ({worst:.3e})")
+
+    start = at_frame(scene.eas.frame_start, objects)
+    lifted = start['Top_Case'].translation.z - assembled['Top_Case'].translation.z
+    check(lifted > 1e-4, f"having really moved on the way ({lifted:+.4f})")
+
+    # Once nothing is hidden, the button has no reason to be offered.
+    scene, collection, parts = fresh()
+    check(bool(core.collect_objects(bpy.context)), "a visible collection needs no workaround")
+
+
 def main():
     print("=" * 72)
     print(f"Exploded Assembly Studio - headless test on Blender {bpy.app.version_string}")
@@ -2008,6 +2093,7 @@ def main():
     test_enclosure_custom_range()
     test_enclosure_collection()
     test_source_diagnostics()
+    test_hidden_sources()
 
     print("\n" + "=" * 72)
     if FAILURES:

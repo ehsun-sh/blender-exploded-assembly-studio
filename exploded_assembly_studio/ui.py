@@ -66,6 +66,13 @@ class EAS_PT_main(EASPanel, Panel):
             info.label(text=f"{len(objects)} part(s), {saved} with saved state", icon='CHECKMARK')
         else:
             info.label(text="No parts found", icon='ERROR')
+            # Being hidden is the usual reason, and it is one click to work
+            # around without reorganising the outliner.
+            note = box.column(align=True)
+            note.scale_y = 0.85
+            note.label(text=core.source_report(context))
+            if props.visible_only:
+                box.operator("eas.use_hidden_objects", icon='HIDE_OFF')
 
         # ------------------------------------------------------------ state
         column = layout.column(align=True)

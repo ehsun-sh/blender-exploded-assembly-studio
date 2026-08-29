@@ -236,6 +236,37 @@ def collect_objects(context):
     return result
 
 
+def _layer_path(layer, collection, trail=None):
+    """Layer collections from the root down to ``collection``, or None."""
+    trail = (trail or []) + [layer]
+    if layer.collection == collection:
+        return trail
+    for child in layer.children:
+        found = _layer_path(child, collection, trail)
+        if found:
+            return found
+    return None
+
+
+def visibility_reason(context, collection):
+    """Which switch is hiding a collection, named the way the Outliner names it.
+
+    Exclusion, the eye and the monitor are three different controls in three
+    different places, and inheriting from a parent collection means the one to
+    click may not even be on the row you are looking at.
+    """
+    path = _layer_path(context.view_layer.layer_collection, collection) or []
+    for layer in path:
+        name = layer.collection.name
+        if layer.exclude:
+            return f"'{name}' is excluded from the view layer (the checkbox in the Outliner)"
+        if layer.hide_viewport:
+            return f"'{name}' is hidden in the Outliner (the eye icon)"
+        if layer.collection.hide_viewport:
+            return f"'{name}' is disabled in viewports (the monitor icon)"
+    return "the objects are hidden one by one"
+
+
 def source_report(context):
     """Say why no parts were found, in terms that point at the fix.
 
@@ -262,8 +293,9 @@ def source_report(context):
         visible = [obj for obj in usable if obj.visible_get()]
         if not visible:
             return (
-                f"All {len(usable)} object(s) in '{collection.name}' are hidden or excluded from "
-                "the view layer. Unhide them, or turn off Visible Only under Filtering"
+                f"All {len(usable)} object(s) in '{collection.name}' are invisible because "
+                f"{visibility_reason(context, collection)}. Fix that in the Outliner, or press "
+                "Use Hidden Objects to work on them where they are"
             )
 
     return f"Source collection '{collection.name}' has no usable objects"

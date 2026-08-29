@@ -5,7 +5,7 @@ both ways — explode and assemble — with an optional camera move. It is aimed
 visualisation for electronics and mechanical hardware: PCBs and enclosures, housings, gearboxes,
 network gear, anything that comes apart into layers.
 
-**Version 1.10.1** · tested on **Blender 5.1.2** · minimum **Blender 4.2** (extension install) or
+**Version 1.10.2** · tested on **Blender 5.1.2** · minimum **Blender 4.2** (extension install) or
 **Blender 3.0** (legacy add-on install)
 
 ```text
@@ -79,7 +79,7 @@ Build the installable zip:
 python build.py
 ```
 
-That produces `dist/exploded_assembly_studio-1.10.1.zip`.
+That produces `dist/exploded_assembly_studio-1.10.2.zip`.
 
 **Blender 4.2 and newer (recommended)**
 `Edit → Preferences → Get Extensions → ▼ → Install from Disk…` and pick the zip.
@@ -184,7 +184,7 @@ you can go straight to **PCB Product → Set Assembly Position → ASSEMBLE**.
 | Option | What it does |
 |---|---|
 | Selected Objects / Collection | Where the parts come from |
-| Visible Only | Skip objects hidden in the current view layer |
+| Visible Only | Skip objects hidden in the current view layer. **Turn this off to work on a hidden assembly** — only transforms and keyframes are written, and neither needs an object to be visible |
 
 The header line tells you how many parts were found and how many already have a saved assembly
 state, so you can see at a glance whether the add-on is looking at what you think it is.
@@ -552,7 +552,7 @@ blender -b --factory-startup --python tests/test_addon.py
 The suite builds a synthetic PCB product and drives the whole workflow: presets, saving state,
 explode, assemble, all four direction modes crossed with all three spacing modes, parented and
 rotated hierarchies, staggered sequencing, per-part overrides, exclusion, clearing animation, and
-all three camera modes, the enclosure phase and the multi viewpoint camera. Current result: **265 of 265 checks pass** on Blender 5.1.2.
+all three camera modes, the enclosure phase and the multi viewpoint camera. Current result: **280 of 280 checks pass** on Blender 5.1.2.
 
 The camera-framing tests re-derive the expected distance from the optics formula independently of
 the add-on, and check that it scales correctly with both subject size and focal length.

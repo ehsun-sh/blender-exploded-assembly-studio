@@ -104,6 +104,33 @@ class EAS_OT_set_assembly_position(Operator):
         return {'FINISHED'}
 
 
+class EAS_OT_use_hidden_objects(Operator):
+    """Work on parts that are hidden or excluded, without unhiding them
+
+    Only transforms and keyframes are written, and neither needs an object to
+    be visible, so hiding a heavy assembly for viewport performance does not
+    have to be undone before animating it
+    """
+
+    bl_idname = "eas.use_hidden_objects"
+    bl_label = "Use Hidden Objects"
+    bl_options = {'REGISTER', 'UNDO'}
+
+    @classmethod
+    def poll(cls, context):
+        return context.scene.eas.visible_only
+
+    def execute(self, context):
+        props = context.scene.eas
+        props.visible_only = False
+        found = len(core.collect_objects(context))
+        if found:
+            self.report({'INFO'}, f"Visible Only turned off, {found} part(s) now in range")
+        else:
+            self.report({'WARNING'}, "Visible Only turned off, but still nothing to work with")
+        return {'FINISHED'}
+
+
 class EAS_OT_clear_assembly_state(Operator):
     """Forget the recorded assembled state of the source parts"""
 
@@ -1042,6 +1069,7 @@ class EAS_OT_camera_delete(Operator):
 
 CLASSES = (
     EAS_OT_set_assembly_position,
+    EAS_OT_use_hidden_objects,
     EAS_OT_clear_assembly_state,
     EAS_OT_preview,
     EAS_OT_animate,
