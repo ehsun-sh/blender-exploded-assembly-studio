@@ -292,6 +292,13 @@ class EAS_SceneProperties(PropertyGroup):
         items=CENTER_ITEMS,
         default='BOUNDS',
     )
+    parts_offscreen: BoolProperty(
+        name="Start Off Camera",
+        description="Push every part far enough along its own explode direction to start completely "
+                    "outside the camera frame, so an assemble animation begins on an empty shot and "
+                    "the parts fly in. The explode Distance becomes a minimum",
+        default=False,
+    )
     use_bounds_center: BoolProperty(
         name="Use Geometry Center",
         description="Measure each part from its bounding box center instead of its origin. Turn off for "
@@ -405,7 +412,8 @@ class EAS_SceneProperties(PropertyGroup):
     )
     enclosure_camera_margin: FloatProperty(
         name="Off Camera Margin",
-        description="Extra clearance beyond the edge of frame when parking panels off camera",
+        description="Extra clearance beyond the edge of frame when parking anything off camera, "
+                    "for both enclosure panels and parts",
         default=1.15,
         min=1.0,
         soft_max=3.0,

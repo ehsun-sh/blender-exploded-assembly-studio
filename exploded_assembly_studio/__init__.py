@@ -7,7 +7,7 @@ animation, with an optional orbiting camera. See README.md for the workflow.
 bl_info = {
     "name": "Exploded Assembly Studio",
     "author": "Exploded Assembly Studio",
-    "version": (1, 6, 0),
+    "version": (1, 7, 0),
     "blender": (3, 0, 0),
     "location": "3D Viewport > Sidebar (N) > Exploded",
     "description": "Explode and assemble animations for mechanical and electronic assemblies",

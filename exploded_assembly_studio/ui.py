@@ -89,8 +89,10 @@ class EAS_PT_main(EASPanel, Panel):
             rebuild.operator("eas.rebuild", text=label, icon='FILE_REFRESH')
 
         row = layout.row(align=True)
+        # In an assemble, "exploded" is the first frame and "assembled" the
+        # last, so both previews are useful whichever direction you work in.
         row.operator("eas.preview", text="Preview Exploded", icon='HIDE_OFF').state = 'EXPLODED'
-        row.operator("eas.preview", text="Restore", icon='LOOP_BACK').state = 'ASSEMBLED'
+        row.operator("eas.preview", text="Preview Assembled", icon='LOOP_BACK').state = 'ASSEMBLED'
 
         layout.operator("eas.clear_animation", icon='TRASH')
 
@@ -108,6 +110,7 @@ class EAS_PT_presets(EASPanel, Panel):
         column.operator("eas.apply_preset", text="PCB Product", icon='NODE_MATERIAL').preset = 'PCB_STACK'
         column.operator("eas.apply_preset", text="Radial Technical", icon='FULLSCREEN_ENTER').preset = 'RADIAL'
         column.operator("eas.apply_preset", text="Product Showcase", icon='CAMERA_DATA').preset = 'SHOWCASE'
+        column.operator("eas.apply_preset", text="Drop In From Above", icon='TRIA_DOWN_BAR').preset = 'DROP_IN'
         layout.label(text="Presets overwrite the settings below", icon='INFO')
 
 
@@ -127,6 +130,11 @@ class EAS_PT_explosion(EASPanel, Panel):
             layout.row().prop(props, "axis", expand=True)
         layout.prop(props, "distance")
         layout.prop(props, "magnitude")
+        layout.prop(props, "parts_offscreen")
+        if props.parts_offscreen:
+            layout.prop(props, "enclosure_camera_margin", text="Off Camera Margin")
+            if props.direction == 'CENTER':
+                layout.label(text="From Center spreads parts in a ring", icon='ERROR')
         layout.prop(props, "center_mode")
         if props.direction == 'AXIS_SPLIT' and props.center_mode == 'ACTIVE':
             layout.label(text="Active object defines the split plane", icon='INFO')

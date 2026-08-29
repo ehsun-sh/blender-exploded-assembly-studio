@@ -38,12 +38,40 @@ def _framing_for(context, parts, center):
             if core.is_enclosure(props, part.obj)
         }
 
-    exploded = {part.obj.name: part.parent @ part.basis_exploded for part in parts}
-    radius = max(
-        core.assembly_radius(parts, center, skip=skip),
-        core.assembly_radius(parts, center, exploded, skip=skip),
-    )
+    radius = core.assembly_radius(parts, center, skip=skip)
+    if not props.parts_offscreen:
+        # With parts starting out of shot there is nothing to gain from framing
+        # where they wait, so the camera stays on the assembled product.
+        exploded = {part.obj.name: part.parent @ part.basis_exploded for part in parts}
+        radius = max(radius, core.assembly_radius(parts, center, exploded, skip=skip))
     return camera_module.resolve_framing(context, center, radius)
+
+
+def _apply_camera_rules(context, parts, center, report=None):
+    """Place anything that has to start out of shot, against the camera."""
+    props = context.scene.eas
+    if not (props.parts_offscreen or (
+        props.use_phases and (props.enclosure_offscreen or props.enclosure_avoid_camera)
+    )):
+        return None
+
+    framing = _framing_for(context, parts, center)
+    info = camera_module.camera_info(context, *framing)
+
+    if info is None:
+        if report is not None and props.parts_offscreen:
+            report({'WARNING'}, "Start Off Camera needs a camera to measure against")
+        return framing
+
+    core.apply_enclosure_camera_rules(context, parts, center, info, camera_module)
+    stuck = core.apply_parts_offscreen(context, parts, info, camera_module)
+    if stuck and report is not None:
+        report(
+            {'WARNING'},
+            f"{len(stuck)} part(s) travel straight away from the camera, so they cannot leave "
+            "the frame: " + ", ".join(stuck[:3]),
+        )
+    return framing
 
 
 def _no_parts_message(props):
@@ -126,7 +154,10 @@ class EAS_OT_preview(Operator):
             return {'CANCELLED'}
 
         if self.state == 'EXPLODED':
-            core.compute_explosion(context, parts)
+            center = core.compute_explosion(context, parts)
+            # Same camera placement the animation uses, so what you preview is
+            # exactly the first frame of an assemble.
+            _apply_camera_rules(context, parts, center, self.report)
             for part in parts:
                 core.apply_basis(part.obj, part.basis_exploded)
 
@@ -180,12 +211,10 @@ class EAS_OT_animate(Operator):
         if props.use_camera and not camera_problem:
             camera_framing = _framing_for(context, parts, center)
 
-        # Enclosure panels are placed against the camera, and the camera frames
-        # the product without them, so the two are resolved in that order.
-        if props.use_phases and (props.enclosure_offscreen or props.enclosure_avoid_camera):
-            framing = camera_framing or _framing_for(context, parts, center)
-            info = camera_module.camera_info(context, *framing)
-            core.apply_enclosure_camera_rules(context, parts, center, info, camera_module)
+        # Anything that has to start out of shot is placed against the camera,
+        # and the camera frames the product without those, so the two are
+        # resolved in that order.
+        _apply_camera_rules(context, parts, center, self.report)
 
         mirror = self.mode == 'ASSEMBLE' and props.reverse_on_assemble
         ordered = core.order_parts(context, parts, reverse=mirror)
@@ -374,6 +403,9 @@ class EAS_OT_apply_preset(Operator):
              "Even radial spread from the assembly center, all parts together"),
             ('SHOWCASE', "Product Showcase",
              "Staggered radial explosion with a spin and a slow orbiting camera"),
+            ('DROP_IN', "Drop In From Above",
+             "Parts wait above the shot, out of frame, and drop straight down onto the board one "
+             "after another. Built for the Assemble direction"),
         ],
         default='PCB_STACK',
     )
@@ -426,6 +458,25 @@ class EAS_OT_apply_preset(Operator):
                 props.camera_subject = active
                 props.camera_mode = 'SUBJECT'
                 props.camera_margin = 1.6
+        elif self.preset == 'DROP_IN':
+            # Straight up, not radial: a radial spread on a flat board just
+            # arranges the parts in a ring around it.
+            props.direction = 'WORLD_AXIS'
+            props.axis = 'Z'
+            props.magnitude = 'UNIFORM'
+            props.center_mode = 'BOUNDS'
+            props.distance = self._auto_distance(context, 1.0) * 2.0
+            props.parts_offscreen = True
+            props.use_rotation = False
+            props.use_sequence = True
+            props.order_mode = 'AXIS'
+            props.overlap = 0.5
+            props.interpolation = 'SINE'
+            props.easing = 'EASE_IN_OUT'
+            props.frame_start = 1
+            props.frame_end = 120
+            props.use_camera = True
+            props.camera_delay_start = 12
         elif self.preset == 'RADIAL':
             props.direction = 'CENTER'
             props.magnitude = 'PROPORTIONAL'

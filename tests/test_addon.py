@@ -1414,6 +1414,147 @@ def test_snapshots():
     check(len(props.snapshots) == 1, "snapshot removed")
 
 
+def test_parts_offscreen():
+    print("\n[14] Parts waiting out of frame, and the ring problem")
+    from exploded_assembly_studio import camera as camera_module
+    from exploded_assembly_studio import core
+
+    scene, collection, parts = build_scene()
+    props = scene.eas
+    props.source = 'COLLECTION'
+    props.collection = collection
+    props.distance = 0.04
+    props.frame_start = 1
+    props.frame_end = 100
+
+    objects = list(collection.all_objects)
+    select(objects, active=parts['pcb'])
+    bpy.ops.eas.set_assembly_position()
+    assembled = world_matrices(objects)
+
+    # A camera looking at the board from the front, slightly above.
+    props.use_camera = True
+    props.camera_mode = 'POSES'
+    props.camera_poses.clear()
+    eye = Vector((0.0, -0.45, 0.12))
+    pose_matrix = eye.to_track_quat('Z', 'Y').to_matrix().to_4x4()
+    pose_matrix.translation = eye
+    for _ in range(2):
+        pose = props.camera_poses.add()
+        pose.matrix = core.matrix_to_flat(pose_matrix)
+        pose.lens = 50.0
+    camera_module.respace_poses(props)
+
+    # ---- the reported symptom: From Center lays parts out in a ring --------
+    props.direction = 'CENTER'
+    props.magnitude = 'UNIFORM'
+    props.parts_offscreen = False
+    bpy.ops.eas.animate(mode='ASSEMBLE')
+    ring = at_frame(props.frame_start, objects)
+
+    heights = [
+        ring[f'Component_{i}'].translation.z - assembled[f'Component_{i}'].translation.z
+        for i in range(1, 5)
+    ]
+    spread = [
+        Vector((ring[f'Component_{i}'].translation - assembled[f'Component_{i}'].translation).xy).length
+        for i in range(1, 5)
+    ]
+    check(
+        max(abs(h) for h in heights) < max(spread),
+        "From Center moves parts sideways more than up - the ring the user saw",
+    )
+
+    # ---- straight up instead ---------------------------------------------
+    props.direction = 'WORLD_AXIS'
+    props.axis = 'Z'
+    bpy.ops.eas.animate(mode='ASSEMBLE')
+    up = at_frame(props.frame_start, objects)
+    sideways = max(
+        Vector((up[o.name].translation - assembled[o.name].translation).xy).length
+        for o in objects
+    )
+    check(sideways < 1e-6, f"World Axis Z lifts parts straight up, no ring ({sideways:.2e})")
+
+    # ---- but are they out of shot? ---------------------------------------
+    info = camera_module.camera_info(bpy.context, Vector((0, 0, 0)), 0.1)
+    planes = camera_module._frustum_planes(info.fov_x, info.fov_y)
+    inverse = pose_matrix.inverted()
+
+    def visible(matrix, obj):
+        corners = [matrix @ Vector(c) for c in obj.bound_box]
+        centre = sum(corners, Vector()) / len(corners)
+        radius = max((c - centre).length for c in corners)
+        local = inverse @ centre
+        return not any(normal.dot(local) < -radius for normal in planes)
+
+    seen = [o.name for o in objects if o.eas.role == 'PART' and visible(up[o.name], o)]
+    check(bool(seen), f"at 0.04 they are still in shot, as reported ({len(seen)} visible)")
+
+    # ---- turn the new option on -------------------------------------------
+    props.parts_offscreen = True
+    bpy.ops.eas.animate(mode='ASSEMBLE')
+    hidden_state = at_frame(props.frame_start, objects)
+
+    excluded = {parts['pcb'].name}
+    seen = [
+        o.name for o in objects
+        if o.name not in excluded and visible(hidden_state[o.name], o)
+    ]
+    check(not seen, f"with Start Off Camera every part waits out of frame ({seen})")
+
+    lifted = min(
+        hidden_state[o.name].translation.z - assembled[o.name].translation.z
+        for o in objects if o.name not in excluded
+    )
+    check(lifted > props.distance, f"they were pushed well past the set distance ({lifted:.3f})")
+
+    # They must still land exactly home.
+    home = at_frame(props.frame_end, objects)
+    worst = max(
+        max(abs(x - y) for ra, rb in zip(assembled[n], home[n]) for x, y in zip(ra, rb))
+        for n in assembled
+    )
+    check(worst <= TOLERANCE, f"and still land home exactly ({worst:.3e})")
+
+    # ---- preview must agree with the animation ----------------------------
+    bpy.ops.eas.clear_animation()
+    bpy.ops.eas.preview(state='EXPLODED')
+    preview = world_matrices(objects)
+    worst = max(
+        max(abs(x - y) for ra, rb in zip(hidden_state[n], preview[n]) for x, y in zip(ra, rb))
+        for n in hidden_state
+    )
+    check(worst <= TOLERANCE, f"Preview Exploded matches the animation's first frame ({worst:.3e})")
+
+    bpy.ops.eas.preview(state='ASSEMBLED')
+    restored = world_matrices(objects)
+    worst = max(
+        max(abs(x - y) for ra, rb in zip(assembled[n], restored[n]) for x, y in zip(ra, rb))
+        for n in assembled
+    )
+    check(worst <= TOLERANCE, f"Preview Assembled puts the product back ({worst:.3e})")
+
+    # ---- the preset should do all of this in one click --------------------
+    select(objects, active=parts['pcb'])
+    result = bpy.ops.eas.apply_preset(preset='DROP_IN')
+    check(result == {'FINISHED'}, "Drop In preset applied")
+    check(props.direction == 'WORLD_AXIS' and props.axis == 'Z',
+          "preset explodes straight up rather than radially")
+    check(props.parts_offscreen, "preset starts the parts off camera")
+    check(props.camera_delay_start > 0, "preset holds the camera at the start")
+
+    bpy.ops.eas.animate(mode='ASSEMBLE')
+    preset_state = at_frame(props.frame_start, objects)
+    seen = [
+        o.name for o in objects
+        if o.name not in excluded and visible(preset_state[o.name], o)
+    ]
+    check(not seen, f"the preset alone gives an empty opening frame ({seen})")
+
+    props.parts_offscreen = False
+
+
 def main():
     print("=" * 72)
     print(f"Exploded Assembly Studio - headless test on Blender {bpy.app.version_string}")
@@ -1432,6 +1573,7 @@ def main():
     test_enclosure_camera_rules()
     test_rebuild()
     test_snapshots()
+    test_parts_offscreen()
 
     print("\n" + "=" * 72)
     if FAILURES:

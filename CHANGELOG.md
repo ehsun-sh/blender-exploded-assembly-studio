@@ -3,6 +3,29 @@
 All notable changes to Exploded Assembly Studio are documented here.
 This project follows [Semantic Versioning](https://semver.org/).
 
+## [1.7.0]
+
+### Added
+
+- **Start Off Camera for parts.** Previously only enclosure panels could be parked out of shot, so an
+  assemble animation opened with the parts already visible around the board. Each part is now pushed
+  along its own explode direction until it is fully outside the camera frame, using the same frustum
+  solve. It only changes the distance, never the direction, and acts as a minimum so layered spacing
+  above the threshold survives. Parts travelling straight away from the camera can never leave frame
+  and are reported rather than moved pointlessly far.
+- **Drop In From Above** preset: parts wait above the shot, out of frame, and drop straight down onto
+  the board one after another, with the camera held at the start. Built for the Assemble direction.
+- With parts starting off camera, the framing now measures the assembled product rather than where
+  the parts wait, so the camera no longer pulls back to include them.
+
+### Changed
+
+- The **Restore** button is now called **Preview Assembled**. It always was the assembled preview,
+  but the old name read like an undo. In an assemble animation the exploded state is the first frame
+  and the assembled state the last, so both previews are useful whichever direction you work in.
+- **Preview Exploded** now applies the same off-camera placement the animation uses, so what it shows
+  is exactly the first frame of an assemble.
+
 ## [1.6.0]
 
 ### Added

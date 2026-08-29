@@ -518,6 +518,42 @@ def choose_entry_side(natural, to_camera):
     return max(acceptable, key=lambda side: SIDE_VECTORS[side].dot(natural_vector))
 
 
+def apply_parts_offscreen(context, parts, info, camera_module):
+    """Push ordinary parts along their own direction until they clear the frame.
+
+    Only the distance changes: the direction the explosion already chose is
+    kept, so parts still fly in from wherever the settings say. The computed
+    distance is a minimum, which leaves any part that already travels further
+    exactly where it was and keeps layered spacing above the threshold.
+    Returns the names of parts that cannot clear the frame along their
+    direction, which happens when they travel straight away from the camera.
+    """
+    props = context.scene.eas
+    if not props.parts_offscreen or info is None:
+        return []
+
+    stuck = []
+    for part in parts:
+        obj = part.obj
+        if obj.eas.exclude or is_enclosure(props, obj):
+            continue
+        if part.offset.length <= EPSILON:
+            continue  # pinned by the direction mode, e.g. the board itself
+
+        direction = part.offset.normalized()
+        needed = camera_module.offscreen_distance(
+            info, part.center, part_radius(part), direction, props.enclosure_camera_margin
+        )
+        if needed is None:
+            stuck.append(obj.name)
+            continue
+        if needed > part.offset.length:
+            part.offset = direction * needed
+            part.basis_exploded = _exploded_basis(props, part, AXIS_VECTORS[props.axis])
+
+    return stuck
+
+
 def apply_enclosure_camera_rules(context, parts, center, info, camera_module):
     """Re-place enclosure panels so the camera never sees them waiting.
 

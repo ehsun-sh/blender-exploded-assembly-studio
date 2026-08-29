@@ -1,7 +1,7 @@
 schema_version = "1.0.0"
 
 id = "exploded_assembly_studio"
-version = "1.6.0"
+version = "1.7.0"
 name = "Exploded Assembly Studio"
 tagline = "Explode and assemble animations for mechanical and electronic assemblies"
 maintainer = "Exploded Assembly Studio"

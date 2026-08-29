@@ -5,7 +5,7 @@ both ways — explode and assemble — with an optional camera move. It is aimed
 visualisation for electronics and mechanical hardware: PCBs and enclosures, housings, gearboxes,
 network gear, anything that comes apart into layers.
 
-**Version 1.6.0** · tested on **Blender 5.1.2** · minimum **Blender 4.2** (extension install) or
+**Version 1.7.0** · tested on **Blender 5.1.2** · minimum **Blender 4.2** (extension install) or
 **Blender 3.0** (legacy add-on install)
 
 ```text
@@ -79,7 +79,7 @@ Build the installable zip:
 python build.py
 ```
 
-That produces `dist/exploded_assembly_studio-1.6.0.zip`.
+That produces `dist/exploded_assembly_studio-1.7.0.zip`.
 
 **Blender 4.2 and newer (recommended)**
 `Edit → Preferences → Get Extensions → ▼ → Install from Disk…` and pick the zip.
@@ -199,6 +199,7 @@ afterwards.
 | **PCB Product** | Layered vertical build-up around the active object. The intended workflow for boards and enclosures. |
 | **Radial Technical** | Even radial spread from the centre, all parts moving together. Clean and diagrammatic. |
 | **Product Showcase** | Staggered radial explosion with a spin and a slow orbiting camera. Advertising flavour. |
+| **Drop In From Above** | Parts wait above the shot, out of frame, and drop straight down onto the board one after another. Built for Assemble. |
 
 ### Explosion
 
@@ -212,9 +213,22 @@ afterwards.
 | Spacing → Uniform | Every part travels the same distance. |
 | Spacing → Proportional | Parts further from the centre travel further. |
 | Spacing → **Layered** | Distance is multiplied by the part's layer index, so a stack fans out into even tiers. |
+| Start Off Camera | Push every part along its own direction until it starts outside the camera frame. `Distance` becomes a minimum. |
 | Center | Reference point: Bounding Box, Median Point, 3D Cursor, or **Active Object**. |
 | Layer Tolerance | How close in depth two parts must be to count as the same layer. |
 | Use Geometry Center | Measure parts from their bounding-box centre instead of their origin. Turn this off for CAD models whose origins carry meaning. |
+
+**If your parts end up in a ring around the board**, the direction is `From Center`. On a flat board
+a radial spread has nowhere to go but sideways, so it lays the parts out in a circle. For parts that
+come down from above, use `World Axis` on `Z` — or just apply the **Drop In From Above** preset.
+
+**Start Off Camera** solves the other half of that: parts sitting a short distance above the board
+are still in shot at the first frame. With it on, each part is pushed along its own direction until
+it is fully outside the camera frame, using the same frustum solve the enclosure uses, so an
+assemble animation opens on an empty shot and the parts fly in. It only changes the distance, never
+the direction, and it acts as a minimum — a part already travelling further stays where it was.
+A part travelling straight away from the camera can never leave frame, and is reported rather than
+moved pointlessly far.
 
 **Layer Tolerance** is worth understanding. Without it, four identical capacitors at the same height
 would be ranked 1, 2, 3, 4 and fly to four different altitudes. The tolerance clusters parts at
@@ -506,7 +520,7 @@ blender -b --factory-startup --python tests/test_addon.py
 The suite builds a synthetic PCB product and drives the whole workflow: presets, saving state,
 explode, assemble, all four direction modes crossed with all three spacing modes, parented and
 rotated hierarchies, staggered sequencing, per-part overrides, exclusion, clearing animation, and
-all three camera modes, the enclosure phase and the multi viewpoint camera. Current result: **198 of 198 checks pass** on Blender 5.1.2.
+all three camera modes, the enclosure phase and the multi viewpoint camera. Current result: **211 of 211 checks pass** on Blender 5.1.2.
 
 The camera-framing tests re-derive the expected distance from the optics formula independently of
 the add-on, and check that it scales correctly with both subject size and focal length.
