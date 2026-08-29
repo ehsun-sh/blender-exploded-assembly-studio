@@ -683,6 +683,8 @@ class EAS_PT_hierarchy(EASPanel, Panel):
         layout.prop(props, "group_mode")
         if props.group_mode == 'PREFIX':
             layout.prop(props, "group_separator")
+        elif props.group_mode == 'OVERLAP':
+            layout.prop(props, "group_overlap")
 
         # A count is the only way to tell a working rule from a typo without
         # scrubbing the timeline.
@@ -691,14 +693,18 @@ class EAS_PT_hierarchy(EASPanel, Panel):
             note.scale_y = 0.85
             note.use_property_split = False
             objects = core.collect_objects(context)
-            sizes = {}
-            for obj in objects:
-                key = core.group_key(props, obj)
-                sizes[key] = sizes.get(key, 0) + 1
+            sizes = core.group_sizes(props, objects)
             joined = [size for size in sizes.values() if size > 1]
             note.label(text=f"{len(sizes)} part(s) from {len(objects)} object(s)")
             if joined:
                 note.label(text=f"{len(joined)} of them built from {sum(joined)} pieces")
+                biggest = max(joined)
+                note.label(text=f"largest is {biggest} pieces")
+                # Overlap is transitive, so one bad link can chain the whole
+                # board into a single part. Say so before it reaches a render.
+                if objects and biggest > max(len(objects) // 2, 3):
+                    note.label(text="that is most of the assembly", icon='ERROR')
+                    note.label(text="raise Overlap to break the chain")
             else:
                 note.label(text="nothing grouped - check the rule", icon='ERROR')
 

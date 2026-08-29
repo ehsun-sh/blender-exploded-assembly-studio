@@ -36,6 +36,9 @@ GROUP_ITEMS = [
                                  "built from several pieces", 'OUTLINER_COLLECTION', 1),
     ('PREFIX', "Name Prefix", "Objects whose names share everything before the separator move as one "
                               "part, so U3_body and U3_pins travel together", 'SORTALPHA', 2),
+    ('OVERLAP', "Overlap", "Objects whose shapes sit inside one another move as one part. For imports "
+                           "where the names carry nothing - ComponentBody.3088, .3089, .3090 - this "
+                           "is the only signal left", 'MOD_BOOLEAN', 3),
 ]
 
 DIRECTION_ITEMS = [
@@ -314,6 +317,16 @@ class EAS_SceneProperties(PropertyGroup):
         description="Everything before the first occurrence of this in an object's name is the group "
                     "it belongs to, so U3_body and U3_pins move together",
         default="_",
+    )
+    group_overlap: FloatProperty(
+        name="Overlap",
+        description="How deeply two objects must sit inside each other to count as one part, as a "
+                    "fraction of the smaller one's volume. Raise it if unrelated neighbours are being "
+                    "swept together, lower it if the pieces of a component are not being found",
+        default=0.2,
+        min=0.001,
+        max=1.0,
+        subtype='FACTOR',
     )
 
     # --------------------------------------------------------------- explosion

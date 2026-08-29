@@ -510,6 +510,125 @@ def group_key(props, obj):
     return ('object', obj.name)
 
 
+#: Boxes are padded by this before overlap is measured, so a flat object with
+#: no thickness on one axis can still be found inside something.
+BOX_PAD = 1e-6
+
+
+def _overlap_ratio(low_a, high_a, low_b, high_b):
+    """Shared volume as a fraction of the smaller box. 0.0 when they miss.
+
+    Measured against the smaller of the two on purpose: a chip body swallowing
+    its own pins should read as one part, while the same chip merely standing
+    on a board that dwarfs it should not.
+    """
+    shared = 1.0
+    volume_a = 1.0
+    volume_b = 1.0
+    for axis in range(3):
+        low = max(low_a[axis] - BOX_PAD, low_b[axis] - BOX_PAD)
+        high = min(high_a[axis] + BOX_PAD, high_b[axis] + BOX_PAD)
+        if high <= low:
+            return 0.0
+        shared *= high - low
+        volume_a *= high_a[axis] - low_a[axis] + 2.0 * BOX_PAD
+        volume_b *= high_b[axis] - low_b[axis] + 2.0 * BOX_PAD
+
+    smaller = min(volume_a, volume_b)
+    return shared / smaller if smaller > 0.0 else 0.0
+
+
+def _find(parent, item):
+    root = item
+    while parent[root] != root:
+        root = parent[root]
+    while parent[item] != root:  # path compression, so deep chains stay cheap
+        parent[item], item = root, parent[item]
+    return root
+
+
+def _overlap_assignments(objects, boxes, threshold):
+    """Cluster objects whose boxes sit inside each other, transitively.
+
+    Sweep and prune along X rather than testing every pair: an assembly of a
+    few thousand parts is spread out along the board, so the active list stays
+    short. One big object - the board itself - simply stays active for the whole
+    sweep, which costs one comparison per part rather than blowing up.
+    """
+    usable = [obj.name for obj in objects if boxes.get(obj.name) is not None]
+    parent = {name: name for name in usable}
+
+    order = sorted(usable, key=lambda name: boxes[name][0].x)
+    active = []
+    for name in order:
+        low, high = boxes[name]
+        active = [other for other in active if boxes[other][1].x >= low.x]
+        for other in active:
+            other_low, other_high = boxes[other]
+            if _overlap_ratio(low, high, other_low, other_high) >= threshold:
+                root_a, root_b = _find(parent, name), _find(parent, other)
+                if root_a != root_b:
+                    parent[root_a] = root_b
+        active.append(name)
+
+    return {
+        obj.name: ('overlap', _find(parent, obj.name)) if obj.name in parent
+        else ('object', obj.name)
+        for obj in objects
+    }
+
+
+def group_assignments(props, objects, matrices=None):
+    """``{object name: group key}`` under the current Move Together rule.
+
+    ``matrices`` supplies world transforms by name, for callers that have
+    already resolved the assembled pose; without it each object is measured
+    where it stands.
+    """
+    mode = props.group_mode
+    if mode == 'NONE':
+        return {obj.name: ('object', obj.name) for obj in objects}
+
+    if mode == 'OVERLAP':
+        boxes = {}
+        for obj in objects:
+            world = matrices.get(obj.name) if matrices else obj.matrix_world
+            corners = bound_corners(obj, world) if world is not None else None
+            boxes[obj.name] = bounds_of(corners) if corners else None
+        return _overlap_assignments(objects, boxes, props.group_overlap)
+
+    return {obj.name: group_key(props, obj) for obj in objects}
+
+
+#: Last group_sizes answer, so panel redraws do not re-cluster the assembly.
+_SIZES_CACHE = {}
+
+
+def group_sizes(props, objects):
+    """``{group key: member count}``, cached for the panel's sake.
+
+    Overlap clustering is far too heavy to run on every redraw of a sidebar
+    panel, and the answer only moves when the rule or the object set does.
+    """
+    signature = (
+        props.group_mode,
+        props.group_separator,
+        round(props.group_overlap, 6),
+        len(objects),
+        hash(tuple(obj.name for obj in objects)),
+    )
+    if _SIZES_CACHE.get('signature') == signature:
+        return _SIZES_CACHE['sizes']
+
+    sizes = {}
+    for key in group_assignments(props, objects).values():
+        sizes[key] = sizes.get(key, 0) + 1
+
+    _SIZES_CACHE['signature'] = signature
+    _SIZES_CACHE['sizes'] = sizes
+    return sizes
+
+
 def iter_groups(parts):
     """The parts split into groups, in first-appearance order."""
     order = []
@@ -537,8 +656,13 @@ def _apply_grouping(props, parts):
     if props.group_mode == 'NONE':
         return [[part] for part in parts]
 
+    keys = group_assignments(
+        props,
+        [part.obj for part in parts],
+        {part.obj.name: part.world_assembled for part in parts},
+    )
     for part in parts:
-        part.group = group_key(props, part.obj)
+        part.group = keys[part.obj.name]
 
     blocks = iter_groups(parts)
     for members in blocks:

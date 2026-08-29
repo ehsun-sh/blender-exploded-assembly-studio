@@ -3,6 +3,27 @@
 All notable changes to Exploded Assembly Studio are documented here.
 This project follows [Semantic Versioning](https://semver.org/).
 
+## [1.13.0]
+
+### Added
+
+- **Overlap**, a fourth `Move Together` mode that groups by shape instead of by names or
+  collections. ECAD imports routinely arrive as `ComponentBody.3088`, `.3089`, `.3090` — no prefix,
+  no per-component collection, nothing to match on — while the pieces of one component sit inside
+  each other. Two objects join when their shared volume is at least `Overlap` of the smaller one's,
+  which is what keeps a chip that swallows its own pins together while the same chip standing on a
+  board that dwarfs it stays separate.
+
+  Grouping is transitive, so one bad link can chain a whole board into a single part. The panel now
+  reports the largest part alongside the counts, and says plainly when it has swallowed most of the
+  assembly — raise `Overlap` until it stops.
+
+### Notes
+
+Measured on 2311 objects, the size of a real ECAD import: clustering 0.07 s, first build 0.38 s,
+rebuild 0.44 s. It found all 770 three-piece components and left the board on its own. The panel's
+count is cached against the rule and the object set, so it does not re-cluster on every redraw.
+
 ## [1.12.0]
 
 ### Added

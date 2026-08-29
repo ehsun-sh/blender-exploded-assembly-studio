@@ -2319,6 +2319,77 @@ def test_grouping():
     check(len({part.group for part in parts}) == len(parts),
           "a separator that matches nothing groups nothing")
 
+    # ---- overlap, for imports whose names carry nothing --------------------
+    def overlapping():
+        """Two components in three interpenetrating pieces each, named blindly.
+
+        Modelled on a real ECAD import: ComponentBody.3088, .3089, .3090 with
+        no prefix to go on, the pieces sitting inside one another, and the whole
+        lot standing on a board that dwarfs them.
+        """
+        bpy.ops.wm.read_factory_settings(use_empty=True)
+        scene = bpy.context.scene
+        collection = bpy.data.collections.new("ASSEMBLY")
+        scene.collection.children.link(collection)
+
+        pcb = add_box("PCB", (0.10, 0.06, 0.0016), (0, 0, 0), collection)
+        pieces = {}
+        counter = 3088
+        for x in (-0.03, 0.03):
+            for dx, dz, size in ((0.0, 0.004, (0.008, 0.008, 0.004)),
+                                 (0.002, 0.004, (0.007, 0.007, 0.003)),
+                                 (-0.002, 0.005, (0.006, 0.006, 0.003))):
+                name = f"ComponentBody.{counter}"
+                counter += 1
+                pieces[name] = add_box(name, size, (x + dx, 0.0, dz), collection)
+
+        props = scene.eas
+        props.source = 'COLLECTION'
+        props.collection = collection
+        props.use_camera = False
+        props.direction = 'WORLD_AXIS'
+        props.axis = 'Z'
+        props.distance = 0.05
+        props.magnitude = 'UNIFORM'
+        props.group_mode = 'OVERLAP'
+        props.group_overlap = 0.2
+        select(list(collection.all_objects), active=pcb)
+        bpy.ops.eas.set_assembly_position()
+        return scene, collection, pcb, pieces
+
+    scene, collection, pcb, pieces = overlapping()
+    parts, _ = core.build_parts(bpy.context)
+    core.compute_explosion(bpy.context, parts)
+    by_name = {part.obj.name: part for part in parts}
+    keys = {part.group for part in parts}
+    check(len(keys) == 3, f"overlap finds two components and a board ({len(keys)})")
+
+    left = [by_name[f"ComponentBody.{n}"] for n in (3088, 3089, 3090)]
+    right = [by_name[f"ComponentBody.{n}"] for n in (3091, 3092, 3093)]
+    check(len({part.group for part in left}) == 1,
+          "the three pieces stacked together are one part")
+    check(left[0].group != right[0].group,
+          "and the component on the other side of the board is a different one")
+
+    # The trap: a component standing on a board it barely touches must not be
+    # swallowed by it, or the whole assembly becomes one immovable part.
+    check(by_name["PCB"].group != left[0].group,
+          "the board is not swept in with what stands on it")
+
+    check(len({tuple(round(v, 6) for v in p.offset) for p in left}) == 1,
+          "the grouped pieces share one offset")
+
+    # Chaining is transitive, so the threshold has to be able to break it.
+    scene.eas.group_overlap = 0.95
+    parts, _ = core.build_parts(bpy.context)
+    core.compute_explosion(bpy.context, parts)
+    check(len({part.group for part in parts}) == len(parts),
+          "a strict threshold stops grouping entirely")
+
+    scene.eas.group_overlap = 0.001
+    sizes = core.group_sizes(scene.eas, core.collect_objects(bpy.context))
+    check(max(sizes.values()) >= 3, f"a loose threshold groups more ({sorted(sizes.values())})")
+
     # ---- a per object multiplier cannot tear a group apart -----------------
     scene, collection, pcb, pieces, objects = fresh('COLLECTION')
     pieces["U1_pins"].eas.distance_multiplier = 4.0

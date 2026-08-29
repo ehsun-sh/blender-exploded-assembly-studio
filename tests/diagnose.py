@@ -61,19 +61,24 @@ if not collected:
     print(f"  why            : {core.source_report(bpy.context)}")
 
 print("\n-- move together ---------------------------------------------------")
-print(f"group_mode : {props.group_mode}   separator: {props.group_separator!r}")
+print(f"group_mode : {props.group_mode}   separator: {props.group_separator!r}   "
+      f"overlap: {props.group_overlap}")
 if props.group_mode != 'NONE':
     sizes = {}
-    for obj in collected:
-        key = core.group_key(props, obj)
-        sizes.setdefault(key, []).append(obj.name)
+    for name, key in core.group_assignments(props, collected).items():
+        sizes.setdefault(key, []).append(name)
     multi = {key: names for key, names in sizes.items() if len(names) > 1}
     print(f"             {len(sizes)} part(s) from {len(collected)} object(s), "
           f"{len(multi)} built from more than one piece")
-    for key, names in list(multi.items())[:5]:
-        print(f"             {key[1]}: {names[:6]}")
+    for key, names in sorted(multi.items(), key=lambda item: -len(item[1]))[:5]:
+        print(f"             {len(names)} pieces: {names[:6]}")
     if not multi:
         print("             nothing grouped - the rule matches no two objects")
+    else:
+        biggest = max(len(names) for names in multi.values())
+        if biggest > max(len(collected) // 2, 3):
+            print(f"             WARNING: the largest part is {biggest} objects, most of the "
+                  "assembly. Raise Overlap to break the chain")
 
 print("\n-- enclosure -------------------------------------------------------")
 print(f"use_phases (Enclosure Closes Last) : {props.use_phases}")
