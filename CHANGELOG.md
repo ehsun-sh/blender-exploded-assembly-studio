@@ -3,6 +3,21 @@
 All notable changes to Exploded Assembly Studio are documented here.
 This project follows [Semantic Versioning](https://semver.org/).
 
+## [1.10.1]
+
+### Fixed
+
+- **"The collection has no usable objects" said nothing useful.** The same line came out of four
+  unrelated situations — an empty source collection, one hidden in the outliner, one excluded from
+  the view layer, and one never chosen — and it never named the collection it meant, so a perfectly
+  good enclosure setup looked like the thing that had broken. Every case now names the collection
+  and the fix, including which setting overrides it.
+- `Detect Sides` now reports when the enclosure panels themselves are the unreachable ones, and
+  distinguishes panels sitting **outside the Source set** from panels that are **hidden or excluded**
+  — those are fixed in different places. The Enclosure panel makes the same distinction.
+- Nothing tagged as an enclosure yet is now a warning naming both ways to fix it, rather than an
+  error.
+
 ## [1.10.0]
 
 ### Changed

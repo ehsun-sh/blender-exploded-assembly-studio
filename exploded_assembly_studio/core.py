@@ -236,6 +236,63 @@ def collect_objects(context):
     return result
 
 
+def source_report(context):
+    """Say why no parts were found, in terms that point at the fix.
+
+    "No usable objects" is true of an empty collection, a hidden one, and one
+    excluded from the view layer, and those are fixed in completely different
+    places, so the message has to distinguish them.
+    """
+    props = context.scene.eas
+
+    if props.source != 'COLLECTION':
+        if not context.selected_objects:
+            return "Select the assembly parts first"
+        return "Nothing in the selection can be used as a part"
+
+    collection = props.collection
+    if collection is None:
+        return "Pick a collection under Source first"
+
+    usable = [obj for obj in collection.all_objects if obj.type not in SKIPPED_TYPES]
+    if not usable:
+        return f"Source collection '{collection.name}' holds no objects that can be moved"
+
+    if props.visible_only:
+        visible = [obj for obj in usable if obj.visible_get()]
+        if not visible:
+            return (
+                f"All {len(usable)} object(s) in '{collection.name}' are hidden or excluded from "
+                "the view layer. Unhide them, or turn off Visible Only under Filtering"
+            )
+
+    return f"Source collection '{collection.name}' has no usable objects"
+
+
+def missing_from_source(context, collection):
+    """Split a collection's objects into (hidden, outside the source set).
+
+    Either way they will not be animated, but one is fixed in the outliner and
+    the other by pointing Source somewhere that contains them.
+    """
+    props = context.scene.eas
+    if collection is None:
+        return [], []
+
+    collected = {obj.name for obj in collect_objects(context)}
+    if props.source == 'COLLECTION' and props.collection is not None:
+        in_source = {obj.name for obj in props.collection.all_objects}
+    else:
+        in_source = {obj.name for obj in context.selected_objects}
+
+    hidden, outside = [], []
+    for obj in collection.all_objects:
+        if obj.type in SKIPPED_TYPES or obj.name in collected:
+            continue
+        (hidden if obj.name in in_source else outside).append(obj.name)
+    return hidden, outside
+
+
 def _has_ancestor_in(obj, members):
     parent = obj.parent
     guard = 0

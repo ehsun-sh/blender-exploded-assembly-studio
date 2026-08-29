@@ -252,18 +252,18 @@ class EAS_PT_enclosure(EASPanel, Panel):
         elif props.use_phases:
             block.label(text="No panels yet: pick a collection or mark some", icon='ERROR')
 
-        # Panels outside the source set never get animated at all.
-        collection = props.enclosure_collection
-        if collection is not None:
-            source = {obj.name for obj in objects}
-            missing = [o.name for o in collection.all_objects
-                       if o.name not in source and o.type not in core.SKIPPED_TYPES]
-            if missing:
-                warn = block.column(align=True)
-                warn.scale_y = 0.85
-                warn.label(text=f"{len(missing)} in the collection are not in Source",
-                           icon='ERROR')
-                warn.label(text="so they will not be animated")
+        # Panels the add-on cannot reach never get animated, and the two
+        # reasons are fixed in different places.
+        hidden, outside = core.missing_from_source(context, props.enclosure_collection)
+        if hidden or outside:
+            warn = block.column(align=True)
+            warn.scale_y = 0.85
+            if outside:
+                warn.label(text=f"{len(outside)} panel(s) outside the Source set", icon='ERROR')
+                warn.label(text="point Source at a collection holding them")
+            if hidden:
+                warn.label(text=f"{len(hidden)} panel(s) hidden or excluded", icon='ERROR')
+                warn.label(text="unhide them, or turn off Visible Only")
 
 
 class EAS_PT_animation(EASPanel, Panel):

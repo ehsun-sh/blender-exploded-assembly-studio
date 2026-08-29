@@ -1878,6 +1878,113 @@ def test_enclosure_collection():
     props.enclosure_custom_range = False
 
 
+def test_source_diagnostics():
+    print("\n[18] Saying why nothing was found")
+    from exploded_assembly_studio import core
+
+    def layer_for(name, layer=None):
+        layer = layer or bpy.context.view_layer.layer_collection
+        if layer.collection.name == name:
+            return layer
+        for child in layer.children:
+            found = layer_for(name, child)
+            if found:
+                return found
+        return None
+
+    def fresh():
+        scene, collection, parts = build_box_scene()
+        shell = bpy.data.collections.new("SHELL")
+        collection.children.link(shell)
+        for name, obj in list(parts.items()):
+            if name.startswith("Shell_"):
+                collection.objects.unlink(obj)
+                shell.objects.link(obj)
+        props = scene.eas
+        props.source = 'COLLECTION'
+        props.collection = collection
+        props.enclosure_collection = shell
+        props.use_phases = True
+        select(list(collection.all_objects), active=parts['pcb'])
+        return scene, collection, shell, parts
+
+    def detect_error():
+        try:
+            bpy.ops.eas.detect_sides()
+            return ""
+        except RuntimeError as error:
+            return str(error)
+
+    # A working setup, as the control.
+    scene, collection, shell, parts = fresh()
+    check(detect_error() == "", "detect sides works on a sound setup")
+
+    # The panels are fine but the source collection is unreachable.
+    scene, collection, shell, parts = fresh()
+    layer_for(collection.name).exclude = True
+    message = detect_error()
+    check(collection.name in message,
+          f"the message names the source collection ({message[:60]})")
+    check("hidden or excluded" in message, "and says they are hidden or excluded")
+    check("Visible Only" in message, "and points at the setting that overrides it")
+
+    # The source is fine but the panels are excluded.
+    scene, collection, shell, parts = fresh()
+    layer_for("SHELL").exclude = True
+    message = detect_error()
+    check("enclosure collection" in message,
+          f"an unreachable shell is reported as such ({message[:60]})")
+    check("hidden or excluded" in message, "with the reason given")
+
+    # The source points somewhere empty.
+    scene, collection, shell, parts = fresh()
+    empty = bpy.data.collections.new("NOTHING_HERE")
+    scene.collection.children.link(empty)
+    scene.eas.collection = empty
+    message = detect_error()
+    check("NOTHING_HERE" in message, f"an empty source names itself ({message[:60]})")
+
+    # No collection chosen at all.
+    scene, collection, shell, parts = fresh()
+    scene.eas.collection = None
+    message = detect_error()
+    check("Pick a collection" in message, f"an unset source says so ({message[:60]})")
+
+    # Selected-objects mode with an empty selection.
+    scene, collection, shell, parts = fresh()
+    scene.eas.source = 'SELECTED'
+    bpy.ops.object.select_all(action='DESELECT')
+    message = detect_error()
+    check("Select the assembly parts" in message, f"an empty selection says so ({message[:60]})")
+
+    # Panels present but nothing tagged as enclosure. Nothing is broken here,
+    # so this is a warning rather than an error, which bpy.ops does not raise.
+    scene, collection, shell, parts = fresh()
+    scene.eas.enclosure_collection = None
+    for obj in collection.all_objects:
+        obj.eas.role = 'PART'
+    raised = detect_error()
+    result = bpy.ops.eas.detect_sides()
+    check(raised == "" and result == {'CANCELLED'},
+          "nothing tagged is a warning and a clean cancel, not an error")
+
+    # missing_from_source must split the two reasons apart.
+    scene, collection, shell, parts = fresh()
+    outside_collection = bpy.data.collections.new("OUTSIDE")
+    scene.collection.children.link(outside_collection)
+    stray = add_box("Stray_Panel", (0.01, 0.01, 0.01), (0, 0, 0.2), outside_collection)
+    scene.eas.enclosure_collection = outside_collection
+    hidden, outside = core.missing_from_source(bpy.context, outside_collection)
+    check(stray.name in outside and not hidden,
+          f"an object outside Source is reported as outside ({outside})")
+
+    scene.eas.enclosure_collection = shell
+    layer_for("SHELL").exclude = True
+    hidden, outside = core.missing_from_source(bpy.context, shell)
+    check(len(hidden) == 6 and not outside,
+          f"an excluded panel is reported as hidden ({len(hidden)} hidden, {len(outside)} outside)")
+
+
 def main():
     print("=" * 72)
     print(f"Exploded Assembly Studio - headless test on Blender {bpy.app.version_string}")
@@ -1900,6 +2007,7 @@ def main():
     test_pre_post_roll()
     test_enclosure_custom_range()
     test_enclosure_collection()
+    test_source_diagnostics()
 
     print("\n" + "=" * 72)
     if FAILURES:

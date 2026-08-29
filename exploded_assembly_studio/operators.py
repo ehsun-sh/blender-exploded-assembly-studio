@@ -74,12 +74,9 @@ def _apply_camera_rules(context, parts, center, report=None):
     return framing
 
 
-def _no_parts_message(props):
-    if props.source == 'COLLECTION':
-        if props.collection is None:
-            return "Pick a collection first"
-        return "The collection has no usable objects"
-    return "Select the assembly parts first"
+def _no_parts_message(context):
+    """Why nothing could be collected, phrased so it points at the fix."""
+    return core.source_report(context)
 
 
 class EAS_OT_set_assembly_position(Operator):
@@ -97,7 +94,7 @@ class EAS_OT_set_assembly_position(Operator):
         props = context.scene.eas
         objects = core.collect_objects(context)
         if not objects:
-            self.report({'ERROR'}, _no_parts_message(props))
+            self.report({'ERROR'}, _no_parts_message(context))
             return {'CANCELLED'}
 
         for obj in objects:
@@ -150,7 +147,7 @@ class EAS_OT_preview(Operator):
         props = context.scene.eas
         parts, stored = core.build_parts(context)
         if not parts:
-            self.report({'ERROR'}, _no_parts_message(props))
+            self.report({'ERROR'}, _no_parts_message(context))
             return {'CANCELLED'}
 
         if self.state == 'EXPLODED':
@@ -198,7 +195,7 @@ class EAS_OT_animate(Operator):
 
         parts, stored = core.build_parts(context)
         if not parts:
-            self.report({'ERROR'}, _no_parts_message(props))
+            self.report({'ERROR'}, _no_parts_message(context))
             return {'CANCELLED'}
 
         center = core.compute_explosion(context, parts)
@@ -328,7 +325,7 @@ class EAS_OT_clear_animation(Operator):
     def execute(self, context):
         objects = core.collect_objects(context)
         if not objects:
-            self.report({'ERROR'}, _no_parts_message(context.scene.eas))
+            self.report({'ERROR'}, _no_parts_message(context))
             return {'CANCELLED'}
 
         removed = 0
@@ -361,7 +358,7 @@ class EAS_OT_auto_order(Operator):
         props = context.scene.eas
         parts, _ = core.build_parts(context)
         if not parts:
-            self.report({'ERROR'}, _no_parts_message(props))
+            self.report({'ERROR'}, _no_parts_message(context))
             return {'CANCELLED'}
 
         core.compute_explosion(context, parts)
@@ -551,7 +548,7 @@ class EAS_OT_camera_setup(Operator):
 
         parts, _ = core.build_parts(context)
         if not parts:
-            self.report({'ERROR'}, _no_parts_message(props))
+            self.report({'ERROR'}, _no_parts_message(context))
             return {'CANCELLED'}
 
         center = core.compute_explosion(context, parts)
@@ -977,7 +974,14 @@ class EAS_OT_detect_sides(Operator):
 
         parts, _ = core.build_parts(context)
         if not parts:
-            self.report({'ERROR'}, _no_parts_message(props))
+            # The panels can be perfectly well set up and still not reachable,
+            # so say which collection is actually the problem.
+            message = _no_parts_message(context)
+            hidden, outside = core.missing_from_source(context, props.enclosure_collection)
+            if hidden or outside:
+                message += f" (the enclosure collection's {len(hidden) + len(outside)} object(s) " \
+                           "are not reachable either)"
+            self.report({'ERROR'}, message)
             return {'CANCELLED'}
 
         center = core.assembly_center(context, parts)
@@ -990,7 +994,25 @@ class EAS_OT_detect_sides(Operator):
             found.append(f"{part.obj.name}: {side.title()}")
 
         if not found:
-            self.report({'WARNING'}, "Nothing is marked as an enclosure panel, and no enclosure collection is set")
+            hidden, outside = core.missing_from_source(context, props.enclosure_collection)
+            if outside:
+                self.report(
+                    {'ERROR'},
+                    f"{len(outside)} object(s) in the enclosure collection are outside the Source "
+                    f"set, so they were not picked up: " + ", ".join(outside[:3]),
+                )
+            elif hidden:
+                self.report(
+                    {'ERROR'},
+                    f"{len(hidden)} object(s) in the enclosure collection are hidden or excluded "
+                    f"from the view layer: " + ", ".join(hidden[:3]),
+                )
+            else:
+                self.report(
+                    {'WARNING'},
+                    "Nothing is an enclosure panel yet: pick an enclosure collection, or select "
+                    "the panels and press Mark Enclosure",
+                )
             return {'CANCELLED'}
 
         props.use_phases = True
