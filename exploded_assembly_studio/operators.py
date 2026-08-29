@@ -1,11 +1,12 @@
 """Operators for Exploded Assembly Studio."""
 
 import bpy
-from bpy.props import BoolProperty, EnumProperty, IntProperty
+from bpy.props import BoolProperty, EnumProperty, IntProperty, StringProperty
 from bpy.types import Operator
 
 from . import camera as camera_module
 from . import core
+from . import snapshots
 
 ANIMATION_GROUP = "Exploded Assembly"
 
@@ -722,6 +723,128 @@ class EAS_OT_camera_clear_poses(Operator):
         return {'FINISHED'}
 
 
+class EAS_OT_snapshot_add(Operator):
+    """Take a restore point holding every setting and where the parts are now"""
+
+    bl_idname = "eas.snapshot_add"
+    bl_label = "Take Snapshot"
+    bl_options = {'REGISTER', 'UNDO'}
+
+    name: StringProperty(
+        name="Name",
+        description="Label for this restore point",
+        default="",
+    )
+
+    @classmethod
+    def poll(cls, context):
+        return _object_mode(context)
+
+    def execute(self, context):
+        props = context.scene.eas
+        payload = snapshots.capture(context)
+
+        entry = props.snapshots.add()
+        entry.name = self.name.strip() or f"Snapshot {len(props.snapshots)}"
+        entry.note = snapshots.describe(payload)
+        entry.data = snapshots.to_json(payload)
+        props.snapshot_index = len(props.snapshots) - 1
+
+        self.report({'INFO'}, f"{entry.name} taken - {entry.note}")
+        return {'FINISHED'}
+
+
+class EAS_OT_snapshot_restore(Operator):
+    """Put every setting and part back to the selected restore point"""
+
+    bl_idname = "eas.snapshot_restore"
+    bl_label = "Restore Snapshot"
+    bl_options = {'REGISTER', 'UNDO'}
+
+    index: IntProperty(name="Snapshot", default=-1)
+    clear_animation: BoolProperty(
+        name="Clear Generated Animation",
+        description="Remove the add-on's keyframes as well, so the parts actually stay where the "
+                    "snapshot put them. With the settings restored, Rebuild recreates the animation",
+        default=True,
+    )
+
+    @classmethod
+    def poll(cls, context):
+        return _object_mode(context) and len(context.scene.eas.snapshots) > 0
+
+    def execute(self, context):
+        props = context.scene.eas
+        index = self.index if self.index >= 0 else props.snapshot_index
+        if index >= len(props.snapshots):
+            self.report({'ERROR'}, "No such snapshot")
+            return {'CANCELLED'}
+
+        entry = props.snapshots[index]
+        payload = snapshots.from_json(entry.data)
+        if payload is None:
+            self.report({'ERROR'}, f"{entry.name} is empty or unreadable")
+            return {'CANCELLED'}
+
+        restored, missing = snapshots.apply(context, payload, self.clear_animation)
+
+        message = f"Restored {entry.name} - {len(restored)} object(s)"
+        if missing:
+            self.report(
+                {'WARNING'},
+                f"{message}. {len(missing)} not found, renamed or deleted: "
+                + ", ".join(missing[:3]),
+            )
+        else:
+            self.report({'INFO'}, message)
+        return {'FINISHED'}
+
+
+class EAS_OT_snapshot_update(Operator):
+    """Overwrite the selected restore point with the current state"""
+
+    bl_idname = "eas.snapshot_update"
+    bl_label = "Update Snapshot"
+    bl_options = {'REGISTER', 'UNDO'}
+
+    @classmethod
+    def poll(cls, context):
+        return _object_mode(context) and len(context.scene.eas.snapshots) > 0
+
+    def execute(self, context):
+        props = context.scene.eas
+        index = min(props.snapshot_index, len(props.snapshots) - 1)
+        entry = props.snapshots[index]
+
+        payload = snapshots.capture(context)
+        entry.note = snapshots.describe(payload)
+        entry.data = snapshots.to_json(payload)
+
+        self.report({'INFO'}, f"{entry.name} updated - {entry.note}")
+        return {'FINISHED'}
+
+
+class EAS_OT_snapshot_remove(Operator):
+    """Delete the selected restore point"""
+
+    bl_idname = "eas.snapshot_remove"
+    bl_label = "Remove Snapshot"
+    bl_options = {'REGISTER', 'UNDO'}
+
+    @classmethod
+    def poll(cls, context):
+        return len(context.scene.eas.snapshots) > 0
+
+    def execute(self, context):
+        props = context.scene.eas
+        index = min(props.snapshot_index, len(props.snapshots) - 1)
+        name = props.snapshots[index].name
+        props.snapshots.remove(index)
+        props.snapshot_index = max(0, min(index, len(props.snapshots) - 1))
+        self.report({'INFO'}, f"Removed {name}")
+        return {'FINISHED'}
+
+
 class EAS_OT_mark_role(Operator):
     """Mark the selected objects as inner parts or as enclosure panels"""
 
@@ -853,6 +976,10 @@ CLASSES = (
     EAS_OT_camera_delete,
     EAS_OT_mark_role,
     EAS_OT_detect_sides,
+    EAS_OT_snapshot_add,
+    EAS_OT_snapshot_restore,
+    EAS_OT_snapshot_update,
+    EAS_OT_snapshot_remove,
 )
 
 

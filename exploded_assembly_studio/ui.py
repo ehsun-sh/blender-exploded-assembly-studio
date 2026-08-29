@@ -466,6 +466,58 @@ class EAS_PT_camera(EASPanel, Panel):
         row.operator("eas.camera_delete", text="", icon='X')
 
 
+class EAS_UL_snapshots(UIList):
+    """Restore points, newest at the bottom."""
+
+    def draw_item(self, context, layout, data, item, icon, active_data, active_prop, index):
+        row = layout.row(align=True)
+        row.prop(item, "name", text="", emboss=False, icon='FILE_BACKUP')
+        if item.note:
+            sub = row.row()
+            sub.alignment = 'RIGHT'
+            sub.label(text=item.note)
+
+
+class EAS_PT_snapshots(EASPanel, Panel):
+    bl_idname = "EAS_PT_snapshots"
+    bl_parent_id = "EAS_PT_main"
+    bl_label = "Snapshots"
+    bl_options = {'DEFAULT_CLOSED'}
+
+    def draw(self, context):
+        layout = self.layout
+        props = context.scene.eas
+
+        info = layout.column(align=True)
+        info.scale_y = 0.85
+        info.label(text="A restore point for every setting", icon='INFO')
+        info.label(text="and where the parts are sitting.")
+
+        row = layout.row()
+        row.template_list(
+            "EAS_UL_snapshots", "", props, "snapshots",
+            props, "snapshot_index", rows=3,
+        )
+        side = row.column(align=True)
+        side.operator("eas.snapshot_add", text="", icon='ADD')
+        side.operator("eas.snapshot_remove", text="", icon='REMOVE')
+        side.separator()
+        side.operator("eas.snapshot_update", text="", icon='FILE_REFRESH')
+
+        column = layout.column(align=True)
+        column.scale_y = 1.2
+        restore = column.row(align=True)
+        restore.enabled = bool(len(props.snapshots))
+        restore.operator("eas.snapshot_restore", text="Restore", icon='LOOP_BACK').index = -1
+
+        layout.operator("eas.snapshot_add", text="Take Snapshot", icon='FILE_BACKUP')
+
+        warn = layout.column(align=True)
+        warn.scale_y = 0.85
+        warn.label(text="Stored inside this .blend, so it is", icon='ERROR')
+        warn.label(text="no substitute for saving the file.")
+
+
 class EAS_PT_part(EASPanel, Panel):
     bl_idname = "EAS_PT_part"
     bl_parent_id = "EAS_PT_main"
@@ -523,6 +575,7 @@ class EAS_PT_hierarchy(EASPanel, Panel):
 
 CLASSES = (
     EAS_UL_camera_poses,
+    EAS_UL_snapshots,
     EAS_PT_main,
     EAS_PT_presets,
     EAS_PT_explosion,
@@ -531,6 +584,7 @@ CLASSES = (
     EAS_PT_enclosure,
     EAS_PT_animation,
     EAS_PT_camera,
+    EAS_PT_snapshots,
     EAS_PT_part,
     EAS_PT_hierarchy,
 )

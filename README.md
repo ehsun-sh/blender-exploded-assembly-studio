@@ -5,7 +5,7 @@ both ways — explode and assemble — with an optional camera move. It is aimed
 visualisation for electronics and mechanical hardware: PCBs and enclosures, housings, gearboxes,
 network gear, anything that comes apart into layers.
 
-**Version 1.5.0** · tested on **Blender 5.1.2** · minimum **Blender 4.2** (extension install) or
+**Version 1.6.0** · tested on **Blender 5.1.2** · minimum **Blender 4.2** (extension install) or
 **Blender 3.0** (legacy add-on install)
 
 ```text
@@ -30,6 +30,7 @@ Assembled model  →  Explode animation  →  Exploded view  →  Assemble anima
   - [Enclosure](#enclosure)
   - [Animation](#animation)
   - [Camera](#camera)
+  - [Snapshots](#snapshots)
   - [Active Part](#active-part)
   - [Filtering](#filtering)
 - [How it works](#how-it-works)
@@ -78,7 +79,7 @@ Build the installable zip:
 python build.py
 ```
 
-That produces `dist/exploded_assembly_studio-1.5.0.zip`.
+That produces `dist/exploded_assembly_studio-1.6.0.zip`.
 
 **Blender 4.2 and newer (recommended)**
 `Edit → Preferences → Get Extensions → ▼ → Install from Disk…` and pick the zip.
@@ -416,6 +417,28 @@ Notes:
   render both passes and stitch them together, turn on **Mirror On Assemble** and the assemble pass
   plays the camera backwards so it continues where the explode pass ended.
 
+### Snapshots
+
+A restore point for **every setting** plus where the parts are sitting. Take one before you start
+experimenting, then come back to it whenever a round of changes goes nowhere.
+
+| Button | What it does |
+|---|---|
+| Take Snapshot | Store the current settings, camera path, per-part data and transforms |
+| Restore | Put all of that back |
+| ↻ | Overwrite the selected snapshot with the current state |
+
+Restoring clears the generated keyframes as well, so the parts actually stay where the snapshot put
+them. Since the settings come back too — including which animation was built last — pressing
+**Rebuild** straight afterwards recreates exactly the animation that existed when you took it.
+
+Snapshots are stored inside the .blend, so they survive saving and reloading, and several can be
+kept side by side under whatever names you give them. Objects renamed or deleted since the snapshot
+are reported and skipped rather than blocking the restore.
+
+> A snapshot is **not** a substitute for saving the file. It lives inside the .blend, so if Blender
+> closes unexpectedly before you save, the snapshot goes with the work. Use both.
+
 ### Active Part
 
 Per-object overrides for whatever is active:
@@ -483,7 +506,7 @@ blender -b --factory-startup --python tests/test_addon.py
 The suite builds a synthetic PCB product and drives the whole workflow: presets, saving state,
 explode, assemble, all four direction modes crossed with all three spacing modes, parented and
 rotated hierarchies, staggered sequencing, per-part overrides, exclusion, clearing animation, and
-all three camera modes, the enclosure phase and the multi viewpoint camera. Current result: **165 of 165 checks pass** on Blender 5.1.2.
+all three camera modes, the enclosure phase and the multi viewpoint camera. Current result: **198 of 198 checks pass** on Blender 5.1.2.
 
 The camera-framing tests re-derive the expected distance from the optics formula independently of
 the add-on, and check that it scales correctly with both subject size and focal length.

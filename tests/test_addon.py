@@ -1274,6 +1274,146 @@ def test_rebuild():
     check(props.last_build_mode == 'NONE', "clearing the animation forgets the last build")
 
 
+def test_snapshots():
+    print("\n[13] Snapshots as restore points")
+    from exploded_assembly_studio import core, snapshots
+
+    scene, collection, parts = build_scene()
+    props = scene.eas
+    props.source = 'COLLECTION'
+    props.collection = collection
+    props.use_camera = False
+    props.direction = 'CENTER'
+    props.magnitude = 'UNIFORM'
+    props.distance = 0.05
+    props.frame_start = 1
+    props.frame_end = 60
+
+    objects = list(collection.all_objects)
+    select(objects, active=parts['pcb'])
+    bpy.ops.eas.set_assembly_position()
+
+    # Set up a distinctive state worth coming back to.
+    parts['top_case'].eas.role = 'ENCLOSURE'
+    parts['top_case'].eas.side = 'TOP'
+    parts['connector'].eas.distance_multiplier = 2.5
+    parts['pcb'].eas.exclude = True
+    props.camera_mode = 'POSES'
+    props.camera_poses.clear()
+    for index in range(3):
+        pose = props.camera_poses.add()
+        pose.matrix = core.matrix_to_flat(Matrix.Translation((0.1 * index, -0.5, 0.2)))
+        pose.lens = 35.0 + index * 10.0
+        pose.motion = 'ARC' if index == 0 else 'LINEAR'
+    props.camera_delay_start = 14
+    props.phase_gap_frames = 17
+    bpy.ops.eas.animate(mode='ASSEMBLE')
+
+    before = world_matrices(objects)
+
+    result = bpy.ops.eas.snapshot_add(name="Good State")
+    check(result == {'FINISHED'}, "snapshot taken")
+    check(len(props.snapshots) == 1, "one snapshot stored")
+    check(props.snapshots[0].name == "Good State", "snapshot kept its name")
+    check("object" in props.snapshots[0].note, f"snapshot summarised ({props.snapshots[0].note})")
+
+    payload = snapshots.from_json(props.snapshots[0].data)
+    check(payload is not None, "snapshot payload is valid JSON")
+    check(len(payload['objects']) >= len(objects), "every part is in the payload")
+    check(len(payload['camera_poses']) == 3, "camera viewpoints are in the payload")
+
+    # ---- now wreck everything ---------------------------------------------
+    props.distance = 0.99
+    props.direction = 'WORLD_AXIS'
+    props.magnitude = 'LAYERED'
+    props.frame_end = 250
+    props.camera_delay_start = 0
+    props.phase_gap_frames = 0
+    props.camera_poses.clear()
+    parts['top_case'].eas.role = 'PART'
+    parts['top_case'].eas.side = 'AUTO'
+    parts['connector'].eas.distance_multiplier = 1.0
+    parts['pcb'].eas.exclude = False
+    for obj in objects:
+        obj.location = (5.0, 5.0, 5.0)
+    bpy.context.view_layer.update()
+
+    # ---- and go back ------------------------------------------------------
+    result = bpy.ops.eas.snapshot_restore()
+    check(result == {'FINISHED'}, "restore ran")
+
+    check(close(props.distance, 0.05, 1e-6), f"scene setting came back ({props.distance})")
+    check(props.direction == 'CENTER', "enum setting came back")
+    check(props.magnitude == 'UNIFORM', "spacing setting came back")
+    check(props.frame_end == 60, f"frame range came back ({props.frame_end})")
+    check(props.camera_delay_start == 14, "camera hold came back")
+    check(props.phase_gap_frames == 17, "phase delay came back")
+    check(props.collection == collection, "pointer setting came back")
+
+    check(parts['top_case'].eas.role == 'ENCLOSURE', "per object role came back")
+    check(parts['top_case'].eas.side == 'TOP', "per object side came back")
+    check(close(parts['connector'].eas.distance_multiplier, 2.5, 1e-6),
+          "per object multiplier came back")
+    check(parts['pcb'].eas.exclude, "per object exclusion came back")
+
+    check(len(props.camera_poses) == 3, "camera viewpoints came back")
+    lenses = [round(p.lens, 1) for p in props.camera_poses]
+    check(lenses == [35.0, 45.0, 55.0], f"viewpoint focal lengths came back ({lenses})")
+    check(props.camera_poses[0].motion == 'ARC', "viewpoint motion came back")
+
+    after = world_matrices(objects)
+    worst = max(
+        max(abs(x - y) for ra, rb in zip(before[n], after[n]) for x, y in zip(ra, rb))
+        for n in before
+    )
+    check(worst <= TOLERANCE, f"the parts are back where they were (error {worst:.3e})")
+
+    check(
+        all(not obj.animation_data or not obj.animation_data.action for obj in objects),
+        "generated animation was cleared by the restore",
+    )
+    check(props.last_build_mode == 'ASSEMBLE', "restore remembers what had been built")
+
+    # With settings restored, Rebuild reproduces the animation.
+    result = bpy.ops.eas.rebuild()
+    check(result == {'FINISHED'}, "rebuild after restore works")
+    # `before` was taken at frame 1 of an assemble, so it is the exploded pose;
+    # that is the frame to compare the rebuilt animation against.
+    start_state = at_frame(props.frame_start, objects)
+    worst = max(
+        max(abs(x - y) for ra, rb in zip(before[n], start_state[n]) for x, y in zip(ra, rb))
+        for n in before
+    )
+    check(worst <= TOLERANCE, f"and reproduces the same animation ({worst:.3e})")
+
+    # ---- several snapshots, and update -------------------------------------
+    props.distance = 0.2
+    bpy.ops.eas.snapshot_add(name="Wide")
+    check(len(props.snapshots) == 2, "a second snapshot is stored separately")
+    props.distance = 0.05
+    bpy.ops.eas.snapshot_restore(index=1)
+    check(close(props.distance, 0.2, 1e-6), "restoring by index picks the right one")
+
+    props.distance = 0.33
+    bpy.ops.eas.snapshot_update()
+    props.distance = 0.01
+    bpy.ops.eas.snapshot_restore(index=1)
+    check(close(props.distance, 0.33, 1e-6), "update overwrites the selected snapshot")
+
+    bpy.ops.eas.snapshot_restore(index=0)
+    check(close(props.distance, 0.05, 1e-6), "the first snapshot is untouched by the update")
+
+    # ---- a deleted object must not break the restore -----------------------
+    doomed = parts['Screw_1']
+    name = doomed.name
+    bpy.data.objects.remove(doomed, do_unlink=True)
+    result = bpy.ops.eas.snapshot_restore(index=0)
+    check(result == {'FINISHED'}, f"restore survives {name} having been deleted")
+
+    bpy.ops.eas.snapshot_remove()
+    check(len(props.snapshots) == 1, "snapshot removed")
+
+
 def main():
     print("=" * 72)
     print(f"Exploded Assembly Studio - headless test on Blender {bpy.app.version_string}")
@@ -1291,6 +1431,7 @@ def main():
     test_enclosure_phase()
     test_enclosure_camera_rules()
     test_rebuild()
+    test_snapshots()
 
     print("\n" + "=" * 72)
     if FAILURES:

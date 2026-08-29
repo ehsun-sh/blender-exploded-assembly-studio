@@ -7,7 +7,7 @@ animation, with an optional orbiting camera. See README.md for the workflow.
 bl_info = {
     "name": "Exploded Assembly Studio",
     "author": "Exploded Assembly Studio",
-    "version": (1, 5, 0),
+    "version": (1, 6, 0),
     "blender": (3, 0, 0),
     "location": "3D Viewport > Sidebar (N) > Exploded",
     "description": "Explode and assemble animations for mechanical and electronic assemblies",
@@ -17,13 +17,13 @@ bl_info = {
 if "bpy" in locals():  # add-on reload support
     import importlib
 
-    for _module in ("properties", "core", "camera", "operators", "ui"):
+    for _module in ("properties", "core", "camera", "snapshots", "operators", "ui"):
         if _module in locals():
             importlib.reload(locals()[_module])
 
 import bpy  # noqa: E402
 
-from . import camera, core, operators, properties, ui  # noqa: E402,F401
+from . import camera, core, operators, properties, snapshots, ui  # noqa: E402,F401
 
 MODULES = (properties, operators, ui)
 

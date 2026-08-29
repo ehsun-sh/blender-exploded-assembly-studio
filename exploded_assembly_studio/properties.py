@@ -167,6 +167,18 @@ class EAS_CameraPose(PropertyGroup):
     )
 
 
+class EAS_Snapshot(PropertyGroup):
+    """A restore point: every setting, plus where the parts were sitting.
+
+    The payload is JSON in a string property, which keeps snapshots taken by an
+    older version readable when settings are added or renamed later.
+    """
+
+    name: StringProperty(name="Name", default="Snapshot")
+    note: StringProperty(name="Note", default="")
+    data: StringProperty(name="Data", default="")
+
+
 class EAS_ObjectProperties(PropertyGroup):
     """Per object assembly data. Stored in the .blend so it survives reloads."""
 
@@ -617,6 +629,10 @@ class EAS_SceneProperties(PropertyGroup):
         default=False,
     )
 
+    # -------------------------------------------------------------- snapshots
+    snapshots: CollectionProperty(type=EAS_Snapshot)
+    snapshot_index: IntProperty(name="Active Snapshot", default=0, min=0)
+
     # ------------------------------------------------------------------- misc
     last_build_mode: EnumProperty(
         name="Last Build",
@@ -633,6 +649,7 @@ class EAS_SceneProperties(PropertyGroup):
 
 CLASSES = (
     EAS_CameraPose,
+    EAS_Snapshot,
     EAS_ObjectProperties,
     EAS_SceneProperties,
 )

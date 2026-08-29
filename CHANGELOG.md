@@ -3,6 +3,26 @@
 All notable changes to Exploded Assembly Studio are documented here.
 This project follows [Semantic Versioning](https://semver.org/).
 
+## [1.6.0]
+
+### Added
+
+- **Snapshots.** A restore point holding every setting, the camera path, per-object data and where
+  the parts are sitting. Take one before experimenting and come back to it whenever a round of
+  changes goes nowhere. Several can be kept side by side under their own names, and they live in the
+  .blend so they survive saving and reloading.
+- Restoring clears the generated keyframes too, so parts stay where the snapshot put them. Because
+  the settings come back as well, including which animation was built last, pressing Rebuild
+  afterwards recreates exactly the animation that existed at the time.
+- Snapshots are stored as JSON, so one taken by an older version stays readable when settings are
+  added or renamed later: anything unknown is skipped rather than failing. Objects renamed or
+  deleted since the snapshot are reported and skipped rather than blocking the restore.
+
+### Notes
+
+A snapshot is stored inside the .blend, so it is a complement to saving the file, not a replacement
+for it. If Blender closes unexpectedly before a save, the snapshot goes with the work.
+
 ## [1.5.0]
 
 ### Added
