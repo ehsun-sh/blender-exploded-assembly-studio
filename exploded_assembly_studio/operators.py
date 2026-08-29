@@ -33,10 +33,7 @@ def _framing_for(context, parts, center):
     props = context.scene.eas
     skip = None
     if props.use_phases and props.enclosure_offscreen:
-        skip = {
-            part.obj.name for part in parts
-            if core.is_enclosure(props, part.obj)
-        }
+        skip = {part.obj.name for part in parts if part.shell}
 
     radius = core.assembly_radius(parts, center, skip=skip)
     if not props.parts_offscreen:

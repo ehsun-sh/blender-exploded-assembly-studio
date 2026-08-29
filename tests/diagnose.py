@@ -60,6 +60,21 @@ print(f"in range          : {len(collected)} object(s)")
 if not collected:
     print(f"  why            : {core.source_report(bpy.context)}")
 
+print("\n-- move together ---------------------------------------------------")
+print(f"group_mode : {props.group_mode}   separator: {props.group_separator!r}")
+if props.group_mode != 'NONE':
+    sizes = {}
+    for obj in collected:
+        key = core.group_key(props, obj)
+        sizes.setdefault(key, []).append(obj.name)
+    multi = {key: names for key, names in sizes.items() if len(names) > 1}
+    print(f"             {len(sizes)} part(s) from {len(collected)} object(s), "
+          f"{len(multi)} built from more than one piece")
+    for key, names in list(multi.items())[:5]:
+        print(f"             {key[1]}: {names[:6]}")
+    if not multi:
+        print("             nothing grouped - the rule matches no two objects")
+
 print("\n-- enclosure -------------------------------------------------------")
 print(f"use_phases (Enclosure Closes Last) : {props.use_phases}")
 print(f"enclosure collection               : {name_of(shell)}")

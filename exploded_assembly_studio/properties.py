@@ -29,6 +29,15 @@ SOURCE_ITEMS = [
     ('COLLECTION', "Collection", "Use every object inside the chosen collection", 'OUTLINER_COLLECTION', 1),
 ]
 
+GROUP_ITEMS = [
+    ('NONE', "Off", "Every object is a part of its own", 'X', 0),
+    ('COLLECTION', "Collection", "Objects sharing their innermost collection move as one part. "
+                                 "This is how most CAD and ECAD imports already arrange a component "
+                                 "built from several pieces", 'OUTLINER_COLLECTION', 1),
+    ('PREFIX', "Name Prefix", "Objects whose names share everything before the separator move as one "
+                              "part, so U3_body and U3_pins travel together", 'SORTALPHA', 2),
+]
+
 DIRECTION_ITEMS = [
     ('CENTER', "From Center", "Every part moves away from the assembly center (radial)", 'FULLSCREEN_ENTER', 0),
     ('AXIS_SPLIT', "Axis +/- (Split)", "Parts above the center move along +Axis, parts below along -Axis. "
@@ -292,6 +301,19 @@ class EAS_SceneProperties(PropertyGroup):
         description="If a part's parent is also part of the assembly, only the parent is animated so the "
                     "child follows it instead of moving twice",
         default=True,
+    )
+    group_mode: EnumProperty(
+        name="Move Together",
+        description="Treat several objects as one part, so a component built from separate pieces "
+                    "flies in as a single unit instead of coming apart on the way",
+        items=GROUP_ITEMS,
+        default='NONE',
+    )
+    group_separator: StringProperty(
+        name="Separator",
+        description="Everything before the first occurrence of this in an object's name is the group "
+                    "it belongs to, so U3_body and U3_pins move together",
+        default="_",
     )
 
     # --------------------------------------------------------------- explosion

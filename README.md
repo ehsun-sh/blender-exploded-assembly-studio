@@ -507,6 +507,29 @@ Per-object overrides for whatever is active:
 only the parent is keyed and the child rides along, which is what you want for CAD hierarchies.
 Turned off, every object is animated independently.
 
+**Move Together** handles the other case: a component that is several loose objects with no parent
+between them — a chip body, its pins and a silkscreen dot — which would otherwise fly in as separate
+pieces and reassemble themselves in mid air. You do not have to join the meshes.
+
+| Mode | Groups by |
+|---|---|
+| Off | Nothing. Every object is a part of its own |
+| Collection | The innermost collection each object sits in. Most CAD and ECAD imports already arrange components this way |
+| Name Prefix | Everything before the first `Separator` in the object's name, so `U3_body` and `U3_pins` travel together |
+
+A group behaves as one part everywhere: one direction, one distance, one layer, one slot in the
+sequence, one frame window, and one pivot if rotation is on — so the pieces stay rigid relative to
+each other for the whole shot. The test suite holds a three-piece component together to `1.4e-09`
+across a full assemble.
+
+Two things still win over the group: `Exclude` on an object keeps that object where it is, and
+anything already handled by `Skip Parented Children` never reaches the grouping at all. A per-object
+`Distance` multiplier is ignored inside a group, because it would pull the pieces apart — the first
+movable member's travel is the group's travel.
+
+The panel shows how many parts the rule produces and how many of them are multi-piece, so a typo in
+the separator is visible immediately rather than at render time.
+
 ---
 
 ## How it works
@@ -558,7 +581,7 @@ blender -b --factory-startup --python tests/test_addon.py
 The suite builds a synthetic PCB product and drives the whole workflow: presets, saving state,
 explode, assemble, all four direction modes crossed with all three spacing modes, parented and
 rotated hierarchies, staggered sequencing, per-part overrides, exclusion, clearing animation, and
-all three camera modes, the enclosure phase and the multi viewpoint camera. Current result: **301 of 301 checks pass** on Blender 5.1.2.
+all three camera modes, the enclosure phase and the multi viewpoint camera. Current result: **316 of 316 checks pass** on Blender 5.1.2.
 
 The camera-framing tests re-derive the expected distance from the optics formula independently of
 the add-on, and check that it scales correctly with both subject size and focal length.

@@ -3,6 +3,28 @@
 All notable changes to Exploded Assembly Studio are documented here.
 This project follows [Semantic Versioning](https://semver.org/).
 
+## [1.12.0]
+
+### Added
+
+- **Move Together**, under `Filtering`. A component that is several loose objects — a chip body, its
+  pins, a silkscreen dot — used to fly in as separate pieces and reassemble itself in mid air. The
+  only way to hold pieces together was to parent them, or to join the meshes and lose the parts.
+  Group them by their **innermost collection** (how most CAD and ECAD imports already arrange a
+  component) or by a **name prefix** (`U3_body`, `U3_pins`), and the group behaves as one part
+  everywhere: one direction, one distance, one layer, one slot in the sequence, one frame window, and
+  one pivot when rotation is on. The pieces stay rigid relative to each other for the whole shot —
+  measured at `1.4e-09` across a full assemble.
+
+  `Exclude` still wins per object. A per-object `Distance` multiplier is ignored inside a group,
+  because honouring it would pull the pieces apart. The panel counts the parts the rule produces and
+  how many are multi-piece, so a mistyped separator shows up immediately.
+
+### Changed
+
+- Whether a part is a shell panel is now resolved once, when the explosion is computed, instead of
+  being re-derived at every point that asks. A group is one part, so it is a shell or it is not.
+
 ## [1.11.0]
 
 ### Fixed

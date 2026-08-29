@@ -184,6 +184,7 @@ class Part:
     __slots__ = (
         'obj', 'basis_assembled', 'parent', 'world_assembled', 'center',
         'basis_exploded', 'offset', 'rank', 'sort_key', 'sequence',
+        'group', 'shell',
     )
 
     def __init__(self, obj, basis_assembled, parent, world_assembled, center):
@@ -197,6 +198,10 @@ class Part:
         self.rank = 1
         self.sort_key = 0.0
         self.sequence = 0
+        # Alone until compute_explosion says otherwise, so every code path that
+        # groups by this key behaves exactly as it did before grouping existed.
+        self.group = obj.name
+        self.shell = False
 
 
 def is_rig_object(obj, props):
@@ -484,6 +489,100 @@ def assembly_radius(parts, center, matrices=None, skip=None):
     return radius
 
 
+def group_key(props, obj):
+    """Which unit this object moves with. Distinct keys move independently."""
+    mode = props.group_mode
+
+    if mode == 'COLLECTION':
+        # users_collection is ordered, so the first entry is stable for an
+        # object that has been linked into more than one place.
+        collections = obj.users_collection
+        if collections:
+            return ('collection', collections[0].name)
+
+    elif mode == 'PREFIX':
+        separator = props.group_separator
+        if separator:
+            head, found, _tail = obj.name.partition(separator)
+            if found and head:
+                return ('prefix', head)
+
+    return ('object', obj.name)
+
+
+def iter_groups(parts):
+    """The parts split into groups, in first-appearance order."""
+    order = []
+    blocks = {}
+    for part in parts:
+        if part.group not in blocks:
+            blocks[part.group] = []
+            order.append(part.group)
+        blocks[part.group].append(part)
+    return [blocks[key] for key in order]
+
+
+def _apply_grouping(props, parts):
+    """Give every member of a group one shared centre, and return the groups.
+
+    Direction, distance, layer rank and the rotation pivot are all derived from
+    ``part.center``, so a common centre is enough to make the members travel as
+    one rigid piece - there is no special case anywhere downstream. The offsets
+    are still equalised afterwards, because per object overrides can pull two
+    members of a group apart even from the same centre.
+    """
+    for part in parts:
+        part.shell = is_enclosure(props, part.obj)
+
+    if props.group_mode == 'NONE':
+        return [[part] for part in parts]
+
+    for part in parts:
+        part.group = group_key(props, part.obj)
+
+    blocks = iter_groups(parts)
+    for members in blocks:
+        if len(members) < 2:
+            continue
+
+        points = []
+        for part in members:
+            points.extend(bound_corners(part.obj, part.world_assembled))
+        if points:
+            low, high = bounds_of(points)
+            centre = (low + high) * 0.5
+            for part in members:
+                part.center = centre.copy()
+
+        # A group is a single part, so it is a shell panel or it is not.
+        if any(part.shell for part in members):
+            for part in members:
+                part.shell = True
+
+    return blocks
+
+
+def _share_offsets(props, blocks, axis):
+    """Make every member of a group carry the group's offset.
+
+    Distance multipliers and hand set sides are per object, so two members can
+    come out of the explosion with different offsets even from a shared centre.
+    The first movable member wins; anything explicitly excluded still stays put.
+    """
+    for members in blocks:
+        if len(members) < 2:
+            continue
+        movable = [part for part in members if not part.obj.eas.exclude]
+        if len(movable) < 2:
+            continue
+        offset = movable[0].offset
+        for part in movable[1:]:
+            if (part.offset - offset).length <= EPSILON:
+                continue
+            part.offset = offset.copy()
+            part.basis_exploded = _exploded_basis(props, part, axis)
+
+
 def compute_explosion(context, parts):
     """Fill in ``offset``, ``rank`` and ``basis_exploded`` on every part.
 
@@ -494,6 +593,10 @@ def compute_explosion(context, parts):
     axis = AXIS_VECTORS[props.axis]
     size = assembly_radius(parts, center)
     band = size * props.layer_tolerance
+
+    # Grouping comes after the assembly centre, which is measured from where the
+    # objects really are, and before everything that reads part.center.
+    blocks = _apply_grouping(props, parts)
 
     movable = [part for part in parts if not part.obj.eas.exclude]
 
@@ -519,6 +622,8 @@ def compute_explosion(context, parts):
         magnitude = _magnitude_for(props, part, center, max_radius)
         part.offset = direction * magnitude
         part.basis_exploded = _exploded_basis(props, part, axis)
+
+    _share_offsets(props, blocks, axis)
 
     return center
 
@@ -582,7 +687,7 @@ def _direction_for(props, part, center, axis, band):
     delta = part.center - center
 
     # A shell panel opens along its own side, whatever the global direction is.
-    if is_enclosure(props, part.obj):
+    if part.shell:
         return SIDE_VECTORS[resolved_side(part.obj, delta)].copy()
 
     if mode == 'WORLD_AXIS':
@@ -609,7 +714,7 @@ def _direction_for(props, part, center, axis, band):
 def _magnitude_for(props, part, center, max_radius):
     base = props.distance
 
-    if is_enclosure(props, part.obj):
+    if part.shell:
         # Shell panels get a flat, larger travel so they clear the parts inside
         # instead of being spread by the layering rules meant for components.
         return base * props.enclosure_distance_factor * part.obj.eas.distance_multiplier
@@ -703,23 +808,32 @@ def apply_parts_offscreen(context, parts, info, camera_module):
         return []
 
     stuck = []
-    for part in parts:
-        obj = part.obj
-        if obj.eas.exclude or is_enclosure(props, obj):
+    for members in iter_groups(parts):
+        movers = [
+            part for part in members
+            if not part.obj.eas.exclude and not part.shell
+            and part.offset.length > EPSILON  # not pinned, e.g. the board itself
+        ]
+        if not movers:
             continue
-        if part.offset.length <= EPSILON:
-            continue  # pinned by the direction mode, e.g. the board itself
 
-        direction = part.offset.normalized()
+        # One test for the whole group: the members share a centre and a
+        # direction, so the distance that clears the frame is whichever of them
+        # sticks out furthest.
+        lead = movers[0]
+        direction = lead.offset.normalized()
+        radius = max(part_radius(part) for part in movers)
         needed = camera_module.offscreen_distance(
-            info, part.center, part_radius(part), direction, props.enclosure_camera_margin
+            info, lead.center, radius, direction, props.enclosure_camera_margin
         )
         if needed is None:
-            stuck.append(obj.name)
+            stuck.extend(part.obj.name for part in movers)
             continue
-        if needed > part.offset.length:
-            part.offset = direction * needed
-            part.basis_exploded = _exploded_basis(props, part, AXIS_VECTORS[props.axis])
+
+        for part in movers:
+            if needed > part.offset.length:
+                part.offset = direction * needed
+                part.basis_exploded = _exploded_basis(props, part, AXIS_VECTORS[props.axis])
 
     return stuck
 
@@ -741,11 +855,15 @@ def apply_enclosure_camera_rules(context, parts, center, info, camera_module):
     positions = info.positions()
     changes = []
 
-    for part in parts:
-        obj = part.obj
-        if obj.eas.exclude or not is_enclosure(props, obj):
+    for members in iter_groups(parts):
+        panels = [part for part in members if not part.obj.eas.exclude and part.shell]
+        if not panels:
             continue
 
+        # The group opens as one panel: the first member's side leads, and the
+        # travel is whatever gets the whole group clear.
+        part = panels[0]
+        obj = part.obj
         side = resolved_side(obj, part.center - center)
 
         if props.enclosure_avoid_camera:
@@ -766,7 +884,7 @@ def apply_enclosure_camera_rules(context, parts, center, info, camera_module):
         distance = _magnitude_for(props, part, center, 0.0)
 
         if props.enclosure_offscreen:
-            radius = part_radius(part)
+            radius = max(part_radius(member) for member in panels)
             needed = camera_module.offscreen_distance(
                 info, part.center, radius, direction, props.enclosure_camera_margin
             )
@@ -789,9 +907,10 @@ def apply_enclosure_camera_rules(context, parts, center, info, camera_module):
             if needed is not None:
                 distance = max(distance, needed)
 
-        part.offset = direction * distance
-        part.basis_exploded = _exploded_basis(props, part, AXIS_VECTORS[props.axis])
-        changes.append((obj, side, distance))
+        for member in panels:
+            member.offset = direction * distance
+            member.basis_exploded = _exploded_basis(props, member, AXIS_VECTORS[props.axis])
+            changes.append((member.obj, side, distance))
 
     return changes
 
@@ -816,10 +935,15 @@ def order_parts(context, parts, reverse=False):
     if props.reverse_order:
         ordered.reverse()
 
+    if props.group_mode != 'NONE':
+        # Whatever the sort said, the members of one part belong side by side:
+        # the group takes the position of whichever member came first.
+        ordered = [part for members in iter_groups(ordered) for part in members]
+
     if props.use_phases:
         # Explode opens the shell before the parts come out; the mirror below
         # then makes Assemble land the parts first and close the shell last.
-        ordered.sort(key=lambda part: 0 if is_enclosure(props, part.obj) else 1)
+        ordered.sort(key=lambda part: 0 if part.shell else 1)
 
     if reverse:
         ordered.reverse()
@@ -840,7 +964,7 @@ def split_phases(props, ordered):
 
     groups = []
     for part in ordered:
-        flag = is_enclosure(props, part.obj)
+        flag = part.shell
         if groups and groups[-1][1] == flag:
             groups[-1][0].append(part)
         else:
@@ -883,10 +1007,7 @@ def build_timing(props, ordered):
     if len(groups) < 2:
         parts, is_shell = groups[0] if groups else ([], False)
         window = explicit if (is_shell and explicit) else (low, high)
-        return {
-            part.obj.name: _staggered(index, len(parts), window[0], window[1], props)
-            for index, part in enumerate(parts)
-        }
+        return _windows(parts, window[0], window[1], props)
 
     if explicit is not None:
         bounds = [explicit if flag else (low, high) for _items, flag in groups]
@@ -908,9 +1029,23 @@ def build_timing(props, ordered):
         ]
 
     timing = {}
-    for (parts, _flag), (group_low, group_high) in zip(groups, bounds):
-        for index, part in enumerate(parts):
-            timing[part.obj.name] = _staggered(index, len(parts), group_low, group_high, props)
+    for (parts, _flag), (phase_low, phase_high) in zip(groups, bounds):
+        timing.update(_windows(parts, phase_low, phase_high, props))
+    return timing
+
+
+def _windows(parts, low, high, props):
+    """One frame window per group, shared by every member of it.
+
+    Sequencing counts groups, not objects, so a component made of five pieces
+    takes one slot in the stagger rather than five.
+    """
+    blocks = iter_groups(parts)
+    timing = {}
+    for position, members in enumerate(blocks):
+        window = _staggered(position, len(blocks), low, high, props)
+        for part in members:
+            timing[part.obj.name] = window
     return timing
 
 

@@ -679,6 +679,29 @@ class EAS_PT_hierarchy(EASPanel, Panel):
         layout.prop(props, "visible_only")
         layout.prop(props, "skip_child_parts")
 
+        layout.separator()
+        layout.prop(props, "group_mode")
+        if props.group_mode == 'PREFIX':
+            layout.prop(props, "group_separator")
+
+        # A count is the only way to tell a working rule from a typo without
+        # scrubbing the timeline.
+        if props.group_mode != 'NONE':
+            note = layout.box().column(align=True)
+            note.scale_y = 0.85
+            note.use_property_split = False
+            objects = core.collect_objects(context)
+            sizes = {}
+            for obj in objects:
+                key = core.group_key(props, obj)
+                sizes[key] = sizes.get(key, 0) + 1
+            joined = [size for size in sizes.values() if size > 1]
+            note.label(text=f"{len(sizes)} part(s) from {len(objects)} object(s)")
+            if joined:
+                note.label(text=f"{len(joined)} of them built from {sum(joined)} pieces")
+            else:
+                note.label(text="nothing grouped - check the rule", icon='ERROR')
+
 
 CLASSES = (
     EAS_UL_camera_poses,

@@ -2185,6 +2185,152 @@ def test_hidden_sources():
     check(bool(core.collect_objects(bpy.context)), "a visible collection needs no workaround")
 
 
+def test_grouping():
+    print("\n[20] Multi piece parts moving as one")
+    from exploded_assembly_studio import core
+
+    def fresh(mode, separator="_"):
+        """A board with two components, each built from three loose pieces."""
+        bpy.ops.wm.read_factory_settings(use_empty=True)
+        scene = bpy.context.scene
+        collection = bpy.data.collections.new("ASSEMBLY")
+        scene.collection.children.link(collection)
+
+        pcb = add_box("PCB", (0.10, 0.06, 0.0016), (0, 0, 0), collection)
+        pieces = {}
+        for index, x in enumerate((-0.03, 0.03)):
+            label = f"U{index + 1}"
+            home = bpy.data.collections.new(label)
+            collection.children.link(home)
+            for piece, dx, dz in (("body", 0.0, 0.004),
+                                  ("pins", 0.004, 0.001),
+                                  ("dot", -0.004, 0.006)):
+                name = f"{label}_{piece}"
+                pieces[name] = add_box(
+                    name, (0.006, 0.006, 0.002), (x + dx, 0.0, dz), home,
+                )
+
+        props = scene.eas
+        props.source = 'COLLECTION'
+        props.collection = collection
+        props.use_camera = False
+        props.direction = 'WORLD_AXIS'
+        props.axis = 'Z'
+        props.distance = 0.05
+        props.magnitude = 'UNIFORM'
+        props.use_sequence = True
+        props.overlap = 0.0
+        props.group_mode = mode
+        props.group_separator = separator
+        props.frame_start = 1
+        props.frame_end = 60
+
+        objects = list(collection.all_objects)
+        select(objects, active=pcb)
+        bpy.ops.eas.set_assembly_position()
+        return scene, collection, pcb, pieces, objects
+
+    def rigid_error(objects, frame, reference):
+        """How far the pieces of a group drift apart, relative to each other."""
+        state = at_frame(frame, objects)
+        worst = 0.0
+        for name in reference:
+            for other in reference:
+                if name == other:
+                    continue
+                now = (state[name].translation - state[other].translation).length
+                then = (reference[name] - reference[other]).length
+                worst = max(worst, abs(now - then))
+        return worst
+
+    # ---- off: today's behaviour, every piece on its own ---------------------
+    scene, collection, pcb, pieces, objects = fresh('NONE')
+    parts, _ = core.build_parts(bpy.context)
+    core.compute_explosion(bpy.context, parts)
+    keys = {part.group for part in parts}
+    check(len(keys) == len(parts), f"off, every object is its own part ({len(keys)})")
+
+    ordered = core.order_parts(bpy.context, parts)
+    timing = core.build_timing(scene.eas, ordered)
+    slots = {tuple(round(v, 3) for v in window) for window in timing.values()}
+    check(len(slots) == len(parts),
+          f"and every object gets its own slot in the stagger ({len(slots)})")
+
+    # ---- collection: the pieces of U1 share a sub-collection ---------------
+    scene, collection, pcb, pieces, objects = fresh('COLLECTION')
+    parts, _ = core.build_parts(bpy.context)
+    core.compute_explosion(bpy.context, parts)
+    keys = {part.group for part in parts}
+    check(len(keys) == 3, f"grouped by collection there are three parts ({len(keys)})")
+
+    by_name = {part.obj.name: part for part in parts}
+    u1 = [by_name[name] for name in pieces if name.startswith("U1_")]
+    check(len({tuple(round(v, 6) for v in p.offset) for p in u1}) == 1,
+          f"the pieces of U1 share one offset ({[tuple(round(v, 4) for v in p.offset) for p in u1]})")
+    check(len({tuple(round(v, 6) for v in p.center) for p in u1}) == 1,
+          "and one centre, which is what makes rotation rigid too")
+
+    ordered = core.order_parts(bpy.context, parts)
+    timing = core.build_timing(scene.eas, ordered)
+    slots = {tuple(round(v, 3) for v in window) for window in timing.values()}
+    check(len(slots) == 3, f"three parts take three slots, not seven ({len(slots)})")
+    u1_windows = {tuple(round(v, 3) for v in timing[name]) for name in pieces if name.startswith("U1_")}
+    check(len(u1_windows) == 1, f"and U1's pieces move over one window ({u1_windows})")
+
+    # The real test: the pieces must not drift apart during the animation.
+    reference = {name: obj.matrix_world.translation.copy()
+                 for name, obj in pieces.items() if name.startswith("U1_")}
+    bpy.ops.eas.animate(mode='ASSEMBLE')
+    worst = max(rigid_error(objects, frame, reference) for frame in (1, 15, 30, 45, 60))
+    check(worst <= TOLERANCE, f"U1 stays rigid across the whole assemble ({worst:.3e})")
+
+    home = at_frame(scene.eas.frame_end, objects)
+    landed = max(
+        (home[name].translation - reference[name]).length for name in reference
+    )
+    check(landed <= TOLERANCE, f"and lands exactly home ({landed:.3e})")
+
+    start = at_frame(scene.eas.frame_start, objects)
+    travelled = (start["U1_body"].translation - reference["U1_body"]).length
+    check(travelled > 1e-4, f"having really travelled ({travelled:.4f})")
+
+    # ---- name prefix, for imports that have no sub-collections -------------
+    scene, collection, pcb, pieces, objects = fresh('PREFIX')
+    for obj in list(collection.all_objects):
+        for child in list(collection.children):
+            if child.all_objects.get(obj.name) is not None:
+                child.objects.unlink(obj)
+                collection.objects.link(obj)
+    parts, _ = core.build_parts(bpy.context)
+    core.compute_explosion(bpy.context, parts)
+    keys = {part.group for part in parts}
+    check(len(keys) == 3, f"prefix grouping finds the same three parts ({len(keys)})")
+
+    by_name = {part.obj.name: part for part in parts}
+    u2 = [by_name[name] for name in pieces if name.startswith("U2_")]
+    check(len({tuple(round(v, 6) for v in p.offset) for p in u2}) == 1,
+          "U2's pieces share one offset")
+    check(by_name["PCB"].group != u2[0].group, "and the board is not swept in with them")
+
+    # A separator that appears in nothing leaves every object alone.
+    scene.eas.group_separator = "@"
+    parts, _ = core.build_parts(bpy.context)
+    core.compute_explosion(bpy.context, parts)
+    check(len({part.group for part in parts}) == len(parts),
+          "a separator that matches nothing groups nothing")
+
+    # ---- a per object multiplier cannot tear a group apart -----------------
+    scene, collection, pcb, pieces, objects = fresh('COLLECTION')
+    pieces["U1_pins"].eas.distance_multiplier = 4.0
+    parts, _ = core.build_parts(bpy.context)
+    core.compute_explosion(bpy.context, parts)
+    by_name = {part.obj.name: part for part in parts}
+    u1 = [by_name[name] for name in pieces if name.startswith("U1_")]
+    check(len({tuple(round(v, 6) for v in p.offset) for p in u1}) == 1,
+          f"a stray multiplier does not split the group "
+          f"({[round(p.offset.length, 4) for p in u1]})")
+
+
 def main():
     print("=" * 72)
     print(f"Exploded Assembly Studio - headless test on Blender {bpy.app.version_string}")
@@ -2209,6 +2355,7 @@ def main():
     test_enclosure_collection()
     test_source_diagnostics()
     test_hidden_sources()
+    test_grouping()
 
     print("\n" + "=" * 72)
     if FAILURES:
