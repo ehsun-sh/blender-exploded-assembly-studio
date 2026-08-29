@@ -201,8 +201,22 @@ class EAS_PT_enclosure(EASPanel, Panel):
         settings.use_property_split = True
         settings.separator()
         settings.prop(props, "parts_share")
-        settings.prop(props, "phase_gap")
+        settings.prop(props, "phase_gap_frames", text="Phase Delay")
+
+        fps = context.scene.render.fps / max(context.scene.render.fps_base, 1e-6)
+        if props.phase_gap_frames and fps > 0:
+            settings.label(text=f"{props.phase_gap_frames / fps:.2f} s pause before the shell closes",
+                           icon='TIME')
+
+        settings.separator()
+        settings.prop(props, "enclosure_offscreen")
+        margin = settings.row()
+        margin.active = props.enclosure_offscreen
+        margin.prop(props, "enclosure_camera_margin", text="Off Camera Margin")
+        settings.prop(props, "enclosure_avoid_camera")
         settings.prop(props, "enclosure_distance_factor", text="Shell Distance")
+        if props.enclosure_offscreen:
+            settings.label(text="Shell Distance is a minimum here", icon='INFO')
 
         # Summarise what is currently tagged, so the split is not a mystery.
         objects = core.collect_objects(context)
@@ -408,8 +422,14 @@ class EAS_PT_camera(EASPanel, Panel):
         start, end = camera.camera_frame_range(props)
         low, high = core.frame_range_of(props)
         if props.camera_delay_start or props.camera_delay_end:
-            column.label(text=f"Camera moves frames {start:.0f} - {end:.0f} of {low}-{high}",
-                         icon='TIME')
+            fps = context.scene.render.fps / max(context.scene.render.fps_base, 1e-6)
+            note = column.column(align=True)
+            note.scale_y = 0.85
+            note.label(text=f"Camera moves frames {start:.0f} - {end:.0f} of {low}-{high}",
+                       icon='TIME')
+            if fps > 0:
+                note.label(text=f"holds {props.camera_delay_start / fps:.2f} s "
+                                f"then {props.camera_delay_end / fps:.2f} s")
 
         column.separator()
         # Per viewpoint timing replaces these in From Viewport mode.

@@ -984,7 +984,7 @@ def test_enclosure_phase():
 
     # ---- phase timing ----------------------------------------------------
     props.parts_share = 0.6
-    props.phase_gap = 0.1
+    props.phase_gap_frames = 10
     bpy.ops.eas.animate(mode='ASSEMBLE')
 
     part_objects = [o for o in objects if o.eas.role == 'PART']
@@ -1035,6 +1035,151 @@ def test_enclosure_phase():
     check(top_delta.z > 1e-4, "and the global direction drives the panels again")
 
 
+def test_enclosure_camera_rules():
+    print("\n[11] Enclosure kept out of frame and out of the camera's path")
+    from exploded_assembly_studio import camera as camera_module
+    from exploded_assembly_studio import core
+
+    scene, collection, parts = build_box_scene()
+    props = scene.eas
+    props.source = 'COLLECTION'
+    props.collection = collection
+    props.direction = 'AXIS_SPLIT'
+    props.center_mode = 'ACTIVE'
+    props.distance = 0.02
+    props.frame_start = 1
+    props.frame_end = 120
+    props.use_sequence = True
+
+    objects = list(collection.all_objects)
+    select(objects, active=parts['pcb'])
+    bpy.ops.eas.set_assembly_position()
+    assembled = world_matrices(objects)
+
+    shells = [obj for name, obj in parts.items() if name.startswith("Shell_")]
+    select(shells, active=shells[0])
+    bpy.ops.eas.mark_role(role='ENCLOSURE')
+    select(objects, active=parts['pcb'])
+    bpy.ops.eas.detect_sides()
+
+    # A camera dead in front of the product, looking at it from -Y.
+    props.use_camera = True
+    props.camera_mode = 'POSES'
+    props.camera_poses.clear()
+    eye = Vector((0.0, -0.6, 0.05))
+    pose_matrix = (eye - Vector((0, 0, 0))).to_track_quat('Z', 'Y').to_matrix().to_4x4()
+    pose_matrix.translation = eye
+    for _ in range(2):
+        pose = props.camera_poses.add()
+        pose.matrix = core.matrix_to_flat(pose_matrix)
+        pose.lens = 50.0
+    camera_module.respace_poses(props)
+
+    props.enclosure_offscreen = True
+    props.enclosure_avoid_camera = True
+    props.enclosure_camera_margin = 1.15
+    props.phase_gap_frames = 12
+
+    bpy.ops.eas.animate(mode='ASSEMBLE')
+
+    # ---- the front panel must not come in past the lens -------------------
+    front_side = None
+    center = Vector((0.0, 0.0, 0.0))
+    parts_list, _ = core.build_parts(bpy.context)
+    center = core.assembly_center(bpy.context, parts_list)
+    core.compute_explosion(bpy.context, parts_list)
+    info = camera_module.camera_info(bpy.context, center, 0.1)
+    check(info is not None, "camera info built from the captured viewpoints")
+    changes = core.apply_enclosure_camera_rules(
+        bpy.context, parts_list, center, info, camera_module
+    )
+    sides = {obj.name: side for obj, side, _ in changes}
+    front_side = sides.get("Shell_Front")
+    check(
+        front_side is not None and front_side != 'FRONT',
+        f"the front panel no longer enters from the camera's side (now {front_side})",
+    )
+    # The back panel cannot keep its own side either, for the opposite reason:
+    # travelling straight away from the camera it only ever gets smaller, so it
+    # never actually leaves the frame. The two rules together rule out both
+    # axes that face the lens and leave a sideways entry.
+    back_centre = Vector((0.0, 0.045, 0.0))
+    straight_away = camera_module.offscreen_distance(
+        info, back_centre, 0.035, Vector((0.0, 1.0, 0.0)), 1.15
+    )
+    check(straight_away is None, "moving straight away from the camera never clears the frame")
+    check(
+        sides.get("Shell_Back") not in (None, 'BACK', 'FRONT'),
+        f"so the back panel enters sideways instead ({sides.get('Shell_Back')})",
+    )
+    sideways = camera_module.offscreen_distance(
+        info, back_centre, 0.035, Vector((0.0, 0.0, 1.0)), 1.15
+    )
+    check(sideways is not None and sideways > 0.0, f"a sideways side does clear it ({sideways:.3f})")
+
+    # ---- every panel must start completely outside the frame --------------
+    fov_x, fov_y = info.fov_x, info.fov_y
+    planes = camera_module._frustum_planes(fov_x, fov_y)
+    inverse = pose_matrix.inverted()
+
+    def outside_frame(part):
+        """True when the part's bounding sphere clears every frustum plane."""
+        world = part.parent @ part.basis_exploded
+        centre = core.object_center(part.obj, world, True)
+        radius = core.part_radius(part, world)
+        local = inverse @ centre
+        return any(normal.dot(local) < -radius for normal in planes)
+
+    hidden = []
+    for part in parts_list:
+        if part.obj.eas.role != 'ENCLOSURE':
+            continue
+        if not outside_frame(part):
+            hidden.append(part.obj.name)
+    check(not hidden, f"every parked panel is fully out of frame ({hidden})")
+
+    # A part, by contrast, is meant to stay in shot.
+    board = next(p for p in parts_list if p.obj.name == "PCB")
+    check(not outside_frame(board), "the board itself stays in frame")
+
+    # ---- the shell still never starts before the parts land ---------------
+    bpy.ops.eas.animate(mode='ASSEMBLE')
+    part_objects = [o for o in objects if o.eas.role == 'PART']
+    shell_objects = [o for o in objects if o.eas.role == 'ENCLOSURE']
+    last_part = max(key_frames(o)[-1] for o in part_objects if key_frames(o))
+    first_shell = min(key_frames(o)[0] for o in shell_objects if key_frames(o))
+    check(first_shell >= last_part - 1e-6,
+          f"shell starts only after the last part lands ({last_part:.1f} -> {first_shell:.1f})")
+    check(close(first_shell - last_part, 12.0, 0.6),
+          f"the delay is exactly the {props.phase_gap_frames} frames asked for "
+          f"({first_shell - last_part:.1f})")
+
+    # Changing the delay must move the shell, not squeeze the parts.
+    props.phase_gap_frames = 30
+    bpy.ops.eas.animate(mode='ASSEMBLE')
+    last_part_2 = max(key_frames(o)[-1] for o in part_objects if key_frames(o))
+    first_shell_2 = min(key_frames(o)[0] for o in shell_objects if key_frames(o))
+    check(close(first_shell_2 - last_part_2, 30.0, 0.6),
+          f"a longer delay is honoured ({first_shell_2 - last_part_2:.1f} frames)")
+
+    # ---- and it all still returns home ------------------------------------
+    home = at_frame(props.frame_end, objects)
+    worst = max(
+        max(abs(x - y) for ra, rb in zip(assembled[n], home[n]) for x, y in zip(ra, rb))
+        for n in assembled
+    )
+    check(worst <= TOLERANCE, f"off camera shells still land home (error {worst:.3e})")
+
+    # ---- turning the rules off restores the plain sides -------------------
+    props.enclosure_offscreen = False
+    props.enclosure_avoid_camera = False
+    parts_list, _ = core.build_parts(bpy.context)
+    core.compute_explosion(bpy.context, parts_list)
+    front = next(p for p in parts_list if p.obj.name == "Shell_Front")
+    check(front.offset.y < -1e-4,
+          f"with the rules off the front panel opens forwards again ({front.offset.y:+.4f})")
+
+
 def main():
     print("=" * 72)
     print(f"Exploded Assembly Studio - headless test on Blender {bpy.app.version_string}")
@@ -1050,6 +1195,7 @@ def main():
     test_camera_delay()
     test_camera_multipoint()
     test_enclosure_phase()
+    test_enclosure_camera_rules()
 
     print("\n" + "=" * 72)
     if FAILURES:

@@ -127,6 +127,154 @@ def subject_distance(context, obj):
     return framing_distance(context, angle, radius, props.camera_margin)
 
 
+class CameraInfo:
+    """Where the camera looks over the shot, for hiding parked panels from it."""
+
+    __slots__ = ('samples', 'fov_x', 'fov_y')
+
+    def __init__(self, samples, fov_x, fov_y):
+        self.samples = samples
+        self.fov_x = fov_x
+        self.fov_y = fov_y
+
+    def positions(self):
+        return [matrix.translation for matrix in self.samples]
+
+
+def split_fov(context, angle):
+    """Horizontal and vertical field of view for the current render aspect."""
+    render = context.scene.render
+    width = render.resolution_x * render.pixel_aspect_x
+    height = render.resolution_y * render.pixel_aspect_y
+    if angle <= 0.0:
+        angle = math.radians(39.6)
+    if width <= 0.0 or height <= 0.0:
+        return angle, angle
+    if width >= height:
+        return angle, 2.0 * math.atan(math.tan(angle * 0.5) * height / width)
+    return 2.0 * math.atan(math.tan(angle * 0.5) * width / height), angle
+
+
+def _look_at(position, target):
+    direction = Vector(position) - Vector(target)
+    if direction.length <= core.EPSILON:
+        direction = Vector((0.0, -1.0, 0.0))
+    matrix = direction.to_track_quat('Z', 'Y').to_matrix().to_4x4()
+    matrix.translation = Vector(position)
+    return matrix
+
+
+def camera_path_samples(context, center, radius, count=9):
+    """World matrices the camera passes through during the animation.
+
+    Poses mode uses the captured viewpoints directly; the orbit modes are
+    reconstructed from the rig parameters, which avoids having to build and
+    evaluate the animation before the parts have been placed.
+    """
+    props = context.scene.eas
+
+    if props.camera_mode == 'POSES':
+        if poses_ready(props):
+            return [_rolled(core.flat_to_matrix(p.matrix), p.roll) for p in sorted_poses_raw(props)]
+        return []
+
+    scale = max(radius, 0.001)
+    lens = props.camera_focal
+    sensor = sensor_width_for(props)
+    if props.camera_auto_distance or props.camera_mode == 'SUBJECT':
+        distance = framing_distance(context, lens_fov(lens, sensor), scale, props.camera_margin)
+    else:
+        distance = props.camera_distance
+
+    if props.camera_use_dolly:
+        near, far = distance * props.camera_zoom_start, distance * props.camera_zoom_end
+        high, low = scale * props.camera_height, scale * props.camera_height_end
+    else:
+        near = far = distance
+        high = low = scale * props.camera_height
+
+    samples = []
+    for step in range(count):
+        t = step / float(max(count - 1, 1))
+        angle = props.camera_start_angle + props.camera_orbit * t
+        offset = Matrix.Rotation(angle, 4, 'Z') @ Vector((
+            0.0, -(near + (far - near) * t), high + (low - high) * t,
+        ))
+        samples.append(_look_at(Vector(center) + offset, center))
+    return samples
+
+
+def sorted_poses_raw(props):
+    """The pose property groups themselves, in time order."""
+    return sorted(props.camera_poses, key=lambda pose: pose.position)
+
+
+def camera_info(context, center, radius):
+    """Camera sampling plus field of view, or None when there is no camera."""
+    props = context.scene.eas
+
+    if props.use_camera:
+        samples = camera_path_samples(context, center, radius)
+        lens = props.camera_focal
+        if props.camera_mode == 'POSES' and len(props.camera_poses):
+            lens = min(pose.lens for pose in props.camera_poses)
+        angle = lens_fov(lens, sensor_width_for(props))
+    else:
+        scene_camera = context.scene.camera
+        if scene_camera is None or scene_camera.type != 'CAMERA':
+            return None
+        samples = [scene_camera.matrix_world.copy()]
+        angle = scene_camera.data.angle
+
+    if not samples:
+        return None
+    fov_x, fov_y = split_fov(context, angle)
+    return CameraInfo(samples, fov_x, fov_y)
+
+
+def _frustum_planes(fov_x, fov_y):
+    """Inward normals of the four side planes, in camera space (looking down -Z)."""
+    half_x, half_y = fov_x * 0.5, fov_y * 0.5
+    return (
+        Vector((-math.cos(half_x), 0.0, -math.sin(half_x))),   # right edge
+        Vector((math.cos(half_x), 0.0, -math.sin(half_x))),    # left edge
+        Vector((0.0, -math.cos(half_y), -math.sin(half_y))),   # top edge
+        Vector((0.0, math.cos(half_y), -math.sin(half_y))),    # bottom edge
+    )
+
+
+def offscreen_distance(info, point, radius, direction, margin=1.0):
+    """How far to travel along ``direction`` to leave the frame, for every camera.
+
+    The frustum planes all pass through the camera, so the test for one plane is
+    linear in the travel distance and solves directly instead of by search.
+    Returns None when no distance along this direction ever gets clear.
+    """
+    planes = _frustum_planes(info.fov_x, info.fov_y)
+    padded = radius * margin
+    needed = 0.0
+
+    for matrix in info.samples:
+        inverse = matrix.inverted()
+        local_point = inverse @ point
+        local_dir = inverse.to_3x3() @ direction
+
+        best = None
+        for normal in planes:
+            offset = normal.dot(local_point)
+            slope = normal.dot(local_dir)
+            if offset < -padded:
+                best = 0.0
+                break
+            if slope < -1e-9:
+                candidate = (-padded - offset) / slope
+                best = candidate if best is None else min(best, candidate)
+        if best is None:
+            return None
+        needed = max(needed, best)
+    return needed
+
+
 def resolve_framing(context, center, radius):
     """Override the framing with the chosen subject when in Frame Object mode.
 

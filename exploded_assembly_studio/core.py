@@ -312,10 +312,16 @@ def assembly_center(context, parts):
     return (low + high) * 0.5
 
 
-def assembly_radius(parts, center, matrices=None):
-    """Largest distance from ``center`` to any part corner."""
+def assembly_radius(parts, center, matrices=None, skip=None):
+    """Largest distance from ``center`` to any part corner.
+
+    ``skip`` drops objects from the measurement, which is how enclosure panels
+    parked off camera are kept from dragging the framing out with them.
+    """
     radius = 0.0
     for part in parts:
+        if skip is not None and part.obj.name in skip:
+            continue
         world = matrices[part.obj.name] if matrices else part.world_assembled
         for corner in bound_corners(part.obj, world):
             radius = max(radius, (corner - center).length)
@@ -478,6 +484,112 @@ def _exploded_basis(props, part, axis):
 # ordering
 # ---------------------------------------------------------------------------
 
+#: A side is "facing the camera" past this much alignment with the camera.
+CAMERA_FACING_LIMIT = 0.35
+
+
+def part_radius(part, matrix=None):
+    """Bounding sphere radius of one part about its own centre."""
+    world = matrix if matrix is not None else part.world_assembled
+    corners = bound_corners(part.obj, world)
+    center = part.center if matrix is None else object_center(part.obj, world)
+    return max((corner - center).length for corner in corners) if corners else 0.0
+
+
+def choose_entry_side(natural, to_camera):
+    """Pick the side a panel enters from, avoiding the camera's own side.
+
+    Candidates are scored by how much they point at the camera; the one closest
+    to the panel's natural side that is still clear of the lens wins, so the
+    change stays as small as the geometry allows.
+    """
+    natural_vector = SIDE_VECTORS[natural]
+    if natural_vector.dot(to_camera) <= CAMERA_FACING_LIMIT:
+        return natural
+
+    acceptable = [
+        side for side in SIDE_ORDER
+        if SIDE_VECTORS[side].dot(to_camera) <= CAMERA_FACING_LIMIT
+    ]
+    if not acceptable:
+        # Every side faces the camera somehow; take the least bad one.
+        return min(SIDE_ORDER, key=lambda side: SIDE_VECTORS[side].dot(to_camera))
+
+    return max(acceptable, key=lambda side: SIDE_VECTORS[side].dot(natural_vector))
+
+
+def apply_enclosure_camera_rules(context, parts, center, info, camera_module):
+    """Re-place enclosure panels so the camera never sees them waiting.
+
+    Runs after the first explosion pass, because the camera framing depends on
+    where the parts go and the panel placement depends on the camera.
+    Returns a list of (object, side, distance) describing what changed.
+    """
+    props = context.scene.eas
+    if not props.use_phases or info is None:
+        return []
+
+    if not (props.enclosure_offscreen or props.enclosure_avoid_camera):
+        return []
+
+    positions = info.positions()
+    changes = []
+
+    for part in parts:
+        obj = part.obj
+        if obj.eas.exclude or not is_enclosure(props, obj):
+            continue
+
+        side = resolved_side(obj, part.center - center)
+
+        if props.enclosure_avoid_camera:
+            # Worst case over the whole shot, so a moving camera cannot catch
+            # the panel sweeping in from its side later on.
+            worst = None
+            for position in positions:
+                towards = position - part.center
+                if towards.length <= EPSILON:
+                    continue
+                towards.normalize()
+                if worst is None or SIDE_VECTORS[side].dot(towards) > SIDE_VECTORS[side].dot(worst):
+                    worst = towards
+            if worst is not None:
+                side = choose_entry_side(side, worst)
+
+        direction = SIDE_VECTORS[side].copy()
+        distance = _magnitude_for(props, part, center, 0.0)
+
+        if props.enclosure_offscreen:
+            radius = part_radius(part)
+            needed = camera_module.offscreen_distance(
+                info, part.center, radius, direction, props.enclosure_camera_margin
+            )
+            if needed is None:
+                # This side can never clear the frame; fall back to the side
+                # that can, scored the same way as the camera avoidance.
+                for candidate in sorted(
+                    SIDE_ORDER,
+                    key=lambda s: -SIDE_VECTORS[s].dot(SIDE_VECTORS[side]),
+                ):
+                    alternative = camera_module.offscreen_distance(
+                        info, part.center, radius, SIDE_VECTORS[candidate],
+                        props.enclosure_camera_margin,
+                    )
+                    if alternative is not None:
+                        side = candidate
+                        direction = SIDE_VECTORS[candidate].copy()
+                        needed = alternative
+                        break
+            if needed is not None:
+                distance = max(distance, needed)
+
+        part.offset = direction * distance
+        part.basis_exploded = _exploded_basis(props, part, AXIS_VECTORS[props.axis])
+        changes.append((obj, side, distance))
+
+    return changes
+
+
 def order_parts(context, parts, reverse=False):
     """Return the parts in the order they should move, and tag ``sequence``."""
     props = context.scene.eas
@@ -548,9 +660,11 @@ def build_timing(props, ordered):
         }
 
     # Two phases: parts get their share of the range, the shell gets the rest,
-    # with an optional pause between them.
+    # with an explicit pause between them. Because every part in a group ends
+    # at or before the group's last frame, the shell can never start moving
+    # before the last part has landed.
     span = max(high - low, 0.0)
-    gap = span * props.phase_gap
+    gap = min(float(props.phase_gap_frames), span * 0.8)
     usable = max(span - gap, 0.0)
     first_is_enclosure = groups[0][1]
     share = props.parts_share

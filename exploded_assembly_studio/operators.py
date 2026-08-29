@@ -23,6 +23,28 @@ def _camera_not_ready(props):
     return ""
 
 
+def _framing_for(context, parts, center):
+    """Resolve the camera framing, ignoring panels that get parked off camera.
+
+    A shell panel sent far out of frame should not drag the camera back with
+    it, so it is left out of the bounds the framing is measured from.
+    """
+    props = context.scene.eas
+    skip = None
+    if props.use_phases and props.enclosure_offscreen:
+        skip = {
+            part.obj.name for part in parts
+            if core.is_enclosure(props, part.obj)
+        }
+
+    exploded = {part.obj.name: part.parent @ part.basis_exploded for part in parts}
+    radius = max(
+        core.assembly_radius(parts, center, skip=skip),
+        core.assembly_radius(parts, center, exploded, skip=skip),
+    )
+    return camera_module.resolve_framing(context, center, radius)
+
+
 def _no_parts_message(props):
     if props.source == 'COLLECTION':
         if props.collection is None:
@@ -155,12 +177,14 @@ class EAS_OT_animate(Operator):
         camera_framing = None
         camera_problem = _camera_not_ready(props) if props.use_camera else ""
         if props.use_camera and not camera_problem:
-            exploded = {part.obj.name: part.parent @ part.basis_exploded for part in parts}
-            radius = max(
-                core.assembly_radius(parts, center),
-                core.assembly_radius(parts, center, exploded),
-            )
-            camera_framing = camera_module.resolve_framing(context, center, radius)
+            camera_framing = _framing_for(context, parts, center)
+
+        # Enclosure panels are placed against the camera, and the camera frames
+        # the product without them, so the two are resolved in that order.
+        if props.use_phases and (props.enclosure_offscreen or props.enclosure_avoid_camera):
+            framing = camera_framing or _framing_for(context, parts, center)
+            info = camera_module.camera_info(context, *framing)
+            core.apply_enclosure_camera_rules(context, parts, center, info, camera_module)
 
         mirror = self.mode == 'ASSEMBLE' and props.reverse_on_assemble
         ordered = core.order_parts(context, parts, reverse=mirror)
@@ -435,12 +459,7 @@ class EAS_OT_camera_setup(Operator):
             return {'CANCELLED'}
 
         center = core.compute_explosion(context, parts)
-        exploded = {part.obj.name: part.parent @ part.basis_exploded for part in parts}
-        radius = max(
-            core.assembly_radius(parts, center),
-            core.assembly_radius(parts, center, exploded),
-        )
-        framing = camera_module.resolve_framing(context, center, radius)
+        framing = _framing_for(context, parts, center)
 
         if self.animate_now:
             camera_module.animate(context, *framing)

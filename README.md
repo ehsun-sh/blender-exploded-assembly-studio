@@ -5,7 +5,7 @@ both ways — explode and assemble — with an optional camera move. It is aimed
 visualisation for electronics and mechanical hardware: PCBs and enclosures, housings, gearboxes,
 network gear, anything that comes apart into layers.
 
-**Version 1.3.0** · tested on **Blender 5.1.2** · minimum **Blender 4.2** (extension install) or
+**Version 1.4.0** · tested on **Blender 5.1.2** · minimum **Blender 4.2** (extension install) or
 **Blender 3.0** (legacy add-on install)
 
 ```text
@@ -77,7 +77,7 @@ Build the installable zip:
 python build.py
 ```
 
-That produces `dist/exploded_assembly_studio-1.3.0.zip`.
+That produces `dist/exploded_assembly_studio-1.4.0.zip`.
 
 **Blender 4.2 and newer (recommended)**
 `Edit → Preferences → Get Extensions → ▼ → Install from Disk…` and pick the zip.
@@ -220,8 +220,39 @@ is what makes a six-sided case open outwards like a box rather than fanning alon
 | Option | What it does |
 |---|---|
 | Parts Share | How much of the frame range the parts phase gets; the shell gets the rest |
-| Phase Gap | A pause between the phases, so the parts settle before the shell closes |
-| Shell Distance | Extra travel for panels, so the case clears the parts inside it |
+| Phase Delay | Frames to wait after the last part lands before the shell starts closing, shown in seconds too |
+| Start Off Camera | Park each panel completely outside the camera frame until its own phase begins |
+| Never Enter Past Camera | Stop a panel entering from the side the camera is on |
+| Off Camera Margin | Extra clearance beyond the edge of frame when parking panels |
+| Shell Distance | Extra travel for panels. A minimum when `Start Off Camera` is on |
+
+The shell **never** starts before every part has landed — that is structural, not a matter of tuning
+`Parts Share`. `Phase Delay` is the pause on top of it.
+
+#### Keeping the shell out of the shot
+
+Two options decide where a panel waits, and they matter more than they sound. A shell panel parked a
+short distance away still sits in frame, covering the board while the parts are landing; and a panel
+that enters from the camera's own side sweeps across the lens on its way in.
+
+**Start Off Camera** parks each panel far enough out to be completely clear of frame. The distance is
+solved from the camera frustum rather than guessed — the frustum planes all pass through the camera,
+so the condition for one plane is linear in the travel distance and solves directly, for every
+camera position in the shot.
+
+**Never Enter Past Camera** gives a panel a different entry side when its own faces the lens, picking
+the side closest to its natural one that is still clear.
+
+Two directions can never hide a panel, and both are handled:
+
+```text
+straight away from the camera  →  only gets smaller, never leaves frame
+straight at the camera         →  only clears frame by flying past the lens
+```
+
+So a front panel in a front view comes down from above, and so does a back panel — neither can hide
+along the view axis. The camera framing ignores parked panels, so sending a shell out of frame does
+not drag the camera back to include it.
 
 Any panel can be overridden in **Active Part → Side**. That covers the case where the automatic
 guess is right but the shot is not: a front panel can be told to come down from above instead of
@@ -413,7 +444,7 @@ blender -b --factory-startup --python tests/test_addon.py
 The suite builds a synthetic PCB product and drives the whole workflow: presets, saving state,
 explode, assemble, all four direction modes crossed with all three spacing modes, parented and
 rotated hierarchies, staggered sequencing, per-part overrides, exclusion, clearing animation, and
-all three camera modes, the enclosure phase and the multi viewpoint camera. Current result: **140 of 140 checks pass** on Blender 5.1.2.
+all three camera modes, the enclosure phase and the multi viewpoint camera. Current result: **152 of 152 checks pass** on Blender 5.1.2.
 
 The camera-framing tests re-derive the expected distance from the optics formula independently of
 the add-on, and check that it scales correctly with both subject size and focal length.

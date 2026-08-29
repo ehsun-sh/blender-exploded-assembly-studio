@@ -370,14 +370,33 @@ class EAS_SceneProperties(PropertyGroup):
         max=0.95,
         subtype='FACTOR',
     )
-    phase_gap: FloatProperty(
-        name="Phase Gap",
-        description="A pause between the two phases, as a fraction of the frame range. A small gap "
-                    "lets the parts settle before the shell closes",
-        default=0.05,
-        min=0.0,
-        max=0.5,
-        subtype='FACTOR',
+    phase_gap_frames: IntProperty(
+        name="Phase Delay",
+        description="Frames to wait after the last part has landed before the enclosure starts "
+                    "closing. The shell never begins before every part has finished",
+        default=10,
+        min=0,
+        soft_max=200,
+    )
+    enclosure_offscreen: BoolProperty(
+        name="Start Off Camera",
+        description="Park each enclosure panel far enough away that it is completely outside the "
+                    "camera frame until its own phase begins, so it does not block the view of the "
+                    "board while the parts are landing",
+        default=True,
+    )
+    enclosure_avoid_camera: BoolProperty(
+        name="Never Enter Past Camera",
+        description="Stop a panel travelling in from the side the camera is on, so it never sweeps "
+                    "across the lens. A front panel in a front view comes down from above instead",
+        default=True,
+    )
+    enclosure_camera_margin: FloatProperty(
+        name="Off Camera Margin",
+        description="Extra clearance beyond the edge of frame when parking panels off camera",
+        default=1.15,
+        min=1.0,
+        soft_max=3.0,
     )
     enclosure_distance_factor: FloatProperty(
         name="Enclosure Distance",

@@ -3,6 +3,37 @@
 All notable changes to Exploded Assembly Studio are documented here.
 This project follows [Semantic Versioning](https://semver.org/).
 
+## [1.4.0]
+
+### Added
+
+- **Start Off Camera.** Enclosure panels are now parked far enough away to be completely outside the
+  camera frame while the parts are landing, so a shell waiting to close never blocks the view of the
+  board. The distance is solved from the camera frustum rather than guessed: the frustum planes all
+  pass through the camera, so the test for one plane is linear in the travel distance and solves
+  directly. `Shell Distance` becomes a minimum when this is on.
+- **Never Enter Past Camera.** A panel whose own side faces the camera is given a different entry
+  direction, so it never sweeps across the lens on its way in. A front panel in a front view comes
+  down from above instead. The substitute is the side closest to the natural one that is still clear
+  of the camera, so the change stays as small as the geometry allows.
+- The camera framing now ignores panels that are parked off camera, so sending a shell out of frame
+  no longer drags the camera back to include it.
+- `Off Camera Margin` for extra clearance beyond the edge of frame.
+
+### Changed
+
+- **`Phase Gap` is now `Phase Delay`, set in frames** rather than as a fraction of the range, and the
+  panel shows it in seconds at the scene frame rate. The enclosure phase could already never begin
+  before the last part landed; the delay on top of that is now a number you set directly.
+- The camera hold now also reads out in seconds.
+
+### Notes
+
+Two directions can never hide a panel, and the add-on now handles both: travelling straight away
+from the camera only makes a panel smaller, so it never leaves frame, and travelling straight at the
+camera only clears the frame by flying past the lens. Both are rejected in favour of a sideways
+entry.
+
 ## [1.3.0]
 
 ### Added
