@@ -210,6 +210,11 @@ class EAS_PT_enclosure(EASPanel, Panel):
         info.label(text="Parts land first, then the shell", icon='INFO')
         info.label(text="closes over them from each side.")
 
+        # Which objects are panels: a whole collection, or tagged by hand.
+        picker = block.column()
+        picker.use_property_split = True
+        picker.prop(props, "enclosure_collection", text="Collection")
+
         block.separator()
         row = block.row(align=True)
         row.operator("eas.mark_role", text="Mark Enclosure", icon='MESH_CUBE').role = 'ENCLOSURE'
@@ -219,32 +224,8 @@ class EAS_PT_enclosure(EASPanel, Panel):
         settings = block.column()
         settings.use_property_split = True
         settings.separator()
-        settings.prop(props, "enclosure_custom_range")
-
-        parts_start, parts_end = core.parts_frame_range(props)
-        fps = context.scene.render.fps / max(context.scene.render.fps_base, 1e-6)
-
-        if props.enclosure_custom_range:
-            frames = settings.column(align=True)
-            frames.prop(props, "enclosure_frame_start", text="Start Frame")
-            frames.prop(props, "enclosure_frame_end", text="End Frame")
-
-            shell_start, shell_end = core.enclosure_window(props)
-            note = settings.column(align=True)
-            note.scale_y = 0.85
-            note.label(text=f"Parts {parts_start:.0f}-{parts_end:.0f}, "
-                            f"shell {shell_start:.0f}-{shell_end:.0f}", icon='TIME')
-            if shell_start < parts_end - 1e-6:
-                note.label(text="Shell starts before the parts finish", icon='ERROR')
-        else:
-            settings.prop(props, "parts_share")
-            settings.prop(props, "phase_gap_frames", text="Phase Delay")
-            if props.phase_gap_frames and fps > 0:
-                settings.label(
-                    text=f"{props.phase_gap_frames / fps:.2f} s pause before the shell closes",
-                    icon='TIME',
-                )
-
+        # Timing lives in the Animation panel, with the other frame ranges.
+        settings.label(text="Frame range is in the Animation panel", icon='TIME')
         settings.separator()
         settings.prop(props, "enclosure_offscreen")
         margin = settings.row()
@@ -257,7 +238,7 @@ class EAS_PT_enclosure(EASPanel, Panel):
 
         # Summarise what is currently tagged, so the split is not a mystery.
         objects = core.collect_objects(context)
-        panels = [obj for obj in objects if obj.eas.role == 'ENCLOSURE']
+        panels = [obj for obj in objects if core.is_enclosure_member(props, obj)]
         if panels:
             summary = block.box().column(align=True)
             summary.scale_y = 0.85
@@ -269,7 +250,20 @@ class EAS_PT_enclosure(EASPanel, Panel):
             if len(panels) > 8:
                 summary.label(text=f"and {len(panels) - 8} more")
         elif props.use_phases:
-            block.label(text="Nothing marked as enclosure yet", icon='ERROR')
+            block.label(text="No panels yet: pick a collection or mark some", icon='ERROR')
+
+        # Panels outside the source set never get animated at all.
+        collection = props.enclosure_collection
+        if collection is not None:
+            source = {obj.name for obj in objects}
+            missing = [o.name for o in collection.all_objects
+                       if o.name not in source and o.type not in core.SKIPPED_TYPES]
+            if missing:
+                warn = block.column(align=True)
+                warn.scale_y = 0.85
+                warn.label(text=f"{len(missing)} in the collection are not in Source",
+                           icon='ERROR')
+                warn.label(text="so they will not be animated")
 
 
 class EAS_PT_animation(EASPanel, Panel):
@@ -277,31 +271,74 @@ class EAS_PT_animation(EASPanel, Panel):
     bl_parent_id = "EAS_PT_main"
     bl_label = "Animation"
 
+    @staticmethod
+    def draw_windows(context, layout, props):
+        """One place showing who moves over which frames."""
+        low, high = core.frame_range_of(props)
+        comp_start, comp_end = core.parts_frame_range(props)
+        cam_start, cam_end = camera.camera_frame_range(props)
+
+        note = layout.box().column(align=True)
+        note.scale_y = 0.85
+        note.label(text=f"Shot  {low}-{high}", icon='TIME')
+        note.label(text=f"Components  {comp_start:.0f}-{comp_end:.0f}")
+        if props.use_phases:
+            if props.enclosure_custom_range:
+                shell_start, shell_end = core.enclosure_window(props)
+            else:
+                shell_start, shell_end = core.derived_enclosure_window(props)
+            note.label(text=f"Enclosure  {shell_start:.0f}-{shell_end:.0f}")
+            if shell_start < comp_end - 1e-6:
+                note.label(text="Enclosure starts before components finish", icon='ERROR')
+        if props.use_camera:
+            note.label(text=f"Camera  {cam_start:.0f}-{cam_end:.0f}")
+
     def draw(self, context):
         layout = self.layout
         layout.use_property_split = True
         layout.use_property_decorate = False
         props = context.scene.eas
 
-        column = layout.column(align=True)
-        column.prop(props, "frame_start")
-        column.prop(props, "frame_end")
+        # Three groups, all speaking the same language: a start frame and an
+        # end frame. The shot is the whole thing; the other two carve windows
+        # out of it, and the camera keeps moving through whatever is left over.
+        shot = layout.column(align=True)
+        shot.label(text="Shot")
+        shot.prop(props, "frame_start", text="Start Frame")
+        shot.prop(props, "frame_end", text="End Frame")
 
-        # The frame range is the whole shot; these carve out where inside it
-        # the parts actually move, leaving the camera running either side.
-        column = layout.column(align=True)
-        column.prop(props, "parts_pre_roll", text="Pre Action")
-        column.prop(props, "parts_post_roll", text="Post Action")
+        layout.separator()
+        component = layout.column(align=True)
+        component.label(text="Component")
+        component.prop(props, "component_custom_range", text="Custom Range")
+        if props.component_custom_range:
+            component.prop(props, "component_frame_start", text="Start Frame")
+            component.prop(props, "component_frame_end", text="End Frame")
+        else:
+            sub = component.column(align=True)
+            sub.enabled = False
+            low, high = core.frame_range_of(props)
+            sub.label(text=f"Start Frame  {low}")
+            sub.label(text=f"End Frame  {high}")
 
-        start, end = core.parts_frame_range(props)
-        low, high = core.frame_range_of(props)
-        if props.parts_pre_roll or props.parts_post_roll:
-            note = layout.column(align=True)
-            note.scale_y = 0.85
-            note.label(text=f"Parts move {start:.0f}-{end:.0f} of the {low}-{high} shot",
-                       icon='TIME')
-            note.label(text="the camera keeps moving either side")
+        layout.separator()
+        enclosure = layout.column(align=True)
+        enclosure.label(text="Enclosure")
+        shell = enclosure.column(align=True)
+        shell.active = props.use_phases
+        shell.prop(props, "enclosure_custom_range", text="Custom Range")
+        if props.enclosure_custom_range:
+            shell.prop(props, "enclosure_frame_start", text="Start Frame")
+            shell.prop(props, "enclosure_frame_end", text="End Frame")
+        else:
+            shell.prop(props, "parts_share")
+            shell.prop(props, "phase_gap_frames", text="Phase Delay")
+        if not props.use_phases:
+            enclosure.label(text="Turn on the Enclosure panel to use this", icon='INFO')
 
+        self.draw_windows(context, layout, props)
+
+        layout.separator()
         layout.prop(props, "interpolation")
         row = layout.row()
         row.active = props.interpolation not in {'LINEAR', 'BEZIER'}
@@ -364,14 +401,14 @@ class EAS_PT_camera(EASPanel, Panel):
         part_start, part_end = core.parts_frame_range(props)
 
         if not (props.camera_delay_start or props.camera_delay_end
-                or props.parts_pre_roll or props.parts_post_roll):
+                or props.component_custom_range):
             return
 
         note = layout.column(align=True)
         note.scale_y = 0.85
         note.label(text=f"Shot {low}-{high}", icon='TIME')
         note.label(text=f"camera moves {cam_start:.0f}-{cam_end:.0f}")
-        note.label(text=f"parts move {part_start:.0f}-{part_end:.0f}")
+        note.label(text=f"components move {part_start:.0f}-{part_end:.0f}")
 
     def draw_orbit(self, context, column, props):
         column.prop(props, "camera_focal")

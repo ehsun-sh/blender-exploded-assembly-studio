@@ -105,6 +105,15 @@ MOTION_ITEMS = [
 ]
 
 
+def _seed_component_range(self, context):
+    """A custom component range starts from the shot it is carved out of."""
+    if not self.component_custom_range:
+        return
+    low, high = min(self.frame_start, self.frame_end), max(self.frame_start, self.frame_end)
+    self.component_frame_start = low
+    self.component_frame_end = high
+
+
 def _seed_enclosure_range(self, context):
     """Start a custom enclosure range from whatever the automatic split gave.
 
@@ -411,6 +420,12 @@ class EAS_SceneProperties(PropertyGroup):
         min=0,
         soft_max=200,
     )
+    enclosure_collection: PointerProperty(
+        name="Enclosure Collection",
+        description="Every object in this collection counts as an enclosure panel, without having "
+                    "to mark them one by one. Objects marked Enclosure by hand still count too",
+        type=bpy.types.Collection,
+    )
     enclosure_custom_range: BoolProperty(
         name="Custom Frame Range",
         description="Give the enclosure its own start and end frame instead of deriving them from "
@@ -469,22 +484,23 @@ class EAS_SceneProperties(PropertyGroup):
         description="Last frame of the generated animation",
         default=60,
     )
-    parts_pre_roll: IntProperty(
-        name="Pre Action",
-        description="Frames at the start of the shot where the parts stay put. The camera still "
-                    "moves through them, so the shot can open on a camera move before anything "
-                    "starts assembling",
-        default=0,
-        min=0,
-        soft_max=240,
+    component_custom_range: BoolProperty(
+        name="Custom Range",
+        description="Give the components their own start and end frame instead of using the whole "
+                    "shot. Frames outside their range are time the camera still moves through, so "
+                    "a shot can open before anything assembles and carry on afterwards",
+        default=False,
+        update=_seed_component_range,
     )
-    parts_post_roll: IntProperty(
-        name="Post Action",
-        description="Frames at the end of the shot after the parts have finished. The camera keeps "
-                    "moving through them, so it can carry on around the finished product",
-        default=0,
-        min=0,
-        soft_max=240,
+    component_frame_start: IntProperty(
+        name="Start Frame",
+        description="Frame the components start moving on",
+        default=1,
+    )
+    component_frame_end: IntProperty(
+        name="End Frame",
+        description="Frame the components finish on",
+        default=60,
     )
     interpolation: EnumProperty(
         name="Interpolation",

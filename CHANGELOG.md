@@ -3,6 +3,35 @@
 All notable changes to Exploded Assembly Studio are documented here.
 This project follows [Semantic Versioning](https://semver.org/).
 
+## [1.10.0]
+
+### Changed
+
+- **All three frame ranges now speak the same language.** The Animation panel has one group each for
+  `Shot`, `Component` and `Enclosure`, and every one of them is a `Start Frame` and an `End Frame`.
+  Previously the shot used absolute frames while the components used `Pre Action` / `Post Action`
+  offsets and the enclosure lived in a different panel entirely — three ways of saying when something
+  happens.
+- `Pre Action` and `Post Action` are replaced by **Component → Custom Range** with explicit start and
+  end frames. Switching it on seeds them from the shot, so it starts as a no-op.
+- The enclosure's timing moved from the Enclosure panel to the Animation panel, next to the other two.
+  The Enclosure panel now covers only *which* objects are panels and *how* they move.
+- One box in the Animation panel lists every window at once — shot, components, enclosure, camera —
+  so nothing has to be inferred.
+
+### Added
+
+- **Enclosure Collection.** Point at a collection and every object in it counts as an enclosure
+  panel, without tagging them one by one. Hand tagged objects still count alongside it, and `Detect
+  Sides` works off both. The panel warns when collection members sit outside the Source set, since
+  those would never be animated.
+
+### Notes
+
+Scenes that used `Pre Action` / `Post Action` will open with the components spanning the whole shot.
+Set them again under Component → Custom Range; the frames are the same numbers the old offsets
+produced.
+
 ## [1.9.0]
 
 ### Added

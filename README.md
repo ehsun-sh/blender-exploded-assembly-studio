@@ -5,7 +5,7 @@ both ways — explode and assemble — with an optional camera move. It is aimed
 visualisation for electronics and mechanical hardware: PCBs and enclosures, housings, gearboxes,
 network gear, anything that comes apart into layers.
 
-**Version 1.9.0** · tested on **Blender 5.1.2** · minimum **Blender 4.2** (extension install) or
+**Version 1.10.0** · tested on **Blender 5.1.2** · minimum **Blender 4.2** (extension install) or
 **Blender 3.0** (legacy add-on install)
 
 ```text
@@ -79,7 +79,7 @@ Build the installable zip:
 python build.py
 ```
 
-That produces `dist/exploded_assembly_studio-1.9.0.zip`.
+That produces `dist/exploded_assembly_studio-1.10.0.zip`.
 
 **Blender 4.2 and newer (recommended)**
 `Edit → Preferences → Get Extensions → ▼ → Install from Disk…` and pick the zip.
@@ -273,9 +273,8 @@ is what makes a six-sided case open outwards like a box rather than fanning alon
 
 | Option | What it does |
 |---|---|
-| Custom Frame Range | Give the shell its own start and end frame, timed independently of the parts |
-| Parts Share | How much of the frame range the parts phase gets; the shell gets the rest. Automatic mode only |
-| Phase Delay | Frames to wait after the last part lands before the shell starts closing, shown in seconds too. Automatic mode only |
+| Collection | Every object in this collection counts as an enclosure panel, no tagging needed |
+| Mark Enclosure / Mark Part | Tag objects by hand, alongside or instead of the collection |
 | Start Off Camera | Park each panel completely outside the camera frame until its own phase begins |
 | Never Enter Past Camera | Stop a panel entering from the side the camera is on |
 | Off Camera Margin | Extra clearance beyond the edge of frame when parking panels |
@@ -553,7 +552,7 @@ blender -b --factory-startup --python tests/test_addon.py
 The suite builds a synthetic PCB product and drives the whole workflow: presets, saving state,
 explode, assemble, all four direction modes crossed with all three spacing modes, parented and
 rotated hierarchies, staggered sequencing, per-part overrides, exclusion, clearing animation, and
-all three camera modes, the enclosure phase and the multi viewpoint camera. Current result: **240 of 240 checks pass** on Blender 5.1.2.
+all three camera modes, the enclosure phase and the multi viewpoint camera. Current result: **253 of 253 checks pass** on Blender 5.1.2.
 
 The camera-framing tests re-derive the expected distance from the optics formula independently of
 the add-on, and check that it scales correctly with both subject size and focal length.

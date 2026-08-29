@@ -402,9 +402,23 @@ def _rank_group(pairs, tolerance):
         previous = key
 
 
+def is_enclosure_member(props, obj):
+    """True when this object counts as a shell panel, phases aside.
+
+    Membership comes from the per object role or from the enclosure collection,
+    so a shell that is already grouped in the outliner needs no tagging.
+    """
+    if obj.eas.role == 'ENCLOSURE':
+        return True
+    collection = props.enclosure_collection
+    if collection is None:
+        return False
+    return collection.all_objects.get(obj.name) is not None
+
+
 def is_enclosure(props, obj):
     """True when the enclosure feature is on and this object is a shell panel."""
-    return props.use_phases and obj.eas.role == 'ENCLOSURE'
+    return props.use_phases and is_enclosure_member(props, obj)
 
 
 def _direction_for(props, part, center, axis, band):
@@ -693,11 +707,7 @@ def derived_enclosure_window(props):
 
 def enclosure_window(props):
     """The explicit enclosure frame range, ordered and never inverted."""
-    low = float(min(props.enclosure_frame_start, props.enclosure_frame_end))
-    high = float(max(props.enclosure_frame_start, props.enclosure_frame_end))
-    if high <= low:
-        high = low + 1.0
-    return low, high
+    return ordered_frames(props.enclosure_frame_start, props.enclosure_frame_end)
 
 
 def build_timing(props, ordered):
@@ -761,21 +771,24 @@ def _staggered(index, count, low, high, props):
 
 
 def parts_frame_range(props):
-    """The frames the parts move over, inside the overall shot.
+    """The frames the components move over, inside the overall shot.
 
-    Pre and post roll carve time off each end where the parts stay put while
-    the camera keeps going. That is how a shot opens on a camera move before
-    anything assembles, and carries on around the finished product afterwards.
+    Anything outside this window is time the camera still moves through, so a
+    shot can open before anything assembles and carry on afterwards.
     """
+    if props.component_custom_range:
+        return ordered_frames(props.component_frame_start, props.component_frame_end)
     low, high = frame_range_of(props)
-    start = float(low) + props.parts_pre_roll
-    end = float(high) - props.parts_post_roll
-    if end <= start:
-        # The rolls swallowed the range; keep a valid, non-inverted pair.
-        middle = (float(low) + float(high)) * 0.5
-        start = min(max(start, float(low)), middle)
-        end = start + 1.0
-    return start, end
+    return float(low), float(high)
+
+
+def ordered_frames(first, second):
+    """A start/end pair that is never inverted or zero length."""
+    low = float(min(first, second))
+    high = float(max(first, second))
+    if high <= low:
+        high = low + 1.0
+    return low, high
 
 
 # ---------------------------------------------------------------------------

@@ -983,14 +983,14 @@ class EAS_OT_detect_sides(Operator):
         center = core.assembly_center(context, parts)
         found = []
         for part in parts:
-            if part.obj.eas.role != 'ENCLOSURE':
+            if not core.is_enclosure_member(props, part.obj):
                 continue
             side = core.detect_side(part.center - center)
             part.obj.eas.side = side
             found.append(f"{part.obj.name}: {side.title()}")
 
         if not found:
-            self.report({'WARNING'}, "No objects are marked as enclosure panels yet")
+            self.report({'WARNING'}, "Nothing is marked as an enclosure panel, and no enclosure collection is set")
             return {'CANCELLED'}
 
         props.use_phases = True

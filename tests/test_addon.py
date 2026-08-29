@@ -1584,14 +1584,16 @@ def test_pre_post_roll():
     props.camera_delay_end = 0
 
     # ---- without any roll, everything spans the shot -----------------------
-    props.parts_pre_roll = 0
-    props.parts_post_roll = 0
+    props.component_custom_range = False
     start, end = core.parts_frame_range(props)
     check(close(start, 1.0) and close(end, 120.0), f"parts span the whole shot ({start}-{end})")
 
-    # ---- carve time off each end ------------------------------------------
-    props.parts_pre_roll = 30
-    props.parts_post_roll = 20
+    # ---- carve a window out of the shot ------------------------------------
+    props.component_custom_range = True
+    seeded = (props.component_frame_start, props.component_frame_end)
+    check(seeded == (1, 120), f"turning it on seeds from the shot {seeded}")
+    props.component_frame_start = 31
+    props.component_frame_end = 100
     start, end = core.parts_frame_range(props)
     check(close(start, 31.0) and close(end, 100.0), f"parts now move 31-100 ({start}-{end})")
 
@@ -1648,14 +1650,13 @@ def test_pre_post_roll():
     check(close(start, 31.0) and close(end, 100.0),
           "and they do not move the parts window")
 
-    # ---- absurd rolls must not invert the range ----------------------------
-    props.parts_pre_roll = 500
-    props.parts_post_roll = 500
+    # ---- inverted input must not invert the window -------------------------
+    props.component_frame_start = 100
+    props.component_frame_end = 40
     start, end = core.parts_frame_range(props)
-    check(end > start, f"absurd rolls still give a valid window ({start:.0f}-{end:.0f})")
+    check(end > start, f"inverted frames are ordered, not inverted ({start:.0f}-{end:.0f})")
 
-    props.parts_pre_roll = 0
-    props.parts_post_roll = 0
+    props.component_custom_range = False
     props.camera_delay_start = 0
     props.camera_delay_end = 0
 
@@ -1698,8 +1699,9 @@ def test_enclosure_custom_range():
                 min(f[0] for f in s), max(f[-1] for f in s))
 
     # ---- the parts window is driven by pre/post action ---------------------
-    props.parts_pre_roll = 20
-    props.parts_post_roll = 30
+    props.component_custom_range = True
+    props.component_frame_start = 21
+    props.component_frame_end = 170
     check(not props.enclosure_custom_range, "custom range is off by default")
 
     bpy.ops.eas.animate(mode='ASSEMBLE')
@@ -1772,8 +1774,108 @@ def test_enclosure_custom_range():
     check(s_start3 >= p_end3 - 1e-6,
           f"the automatic split is back, shell after parts ({p_end3:.0f} -> {s_start3:.0f})")
 
-    props.parts_pre_roll = 0
-    props.parts_post_roll = 0
+    props.component_custom_range = False
+
+
+def test_enclosure_collection():
+    print("\n[17] Enclosure picked by collection")
+    from exploded_assembly_studio import core
+
+    scene, collection, parts = build_box_scene()
+    props = scene.eas
+    props.source = 'COLLECTION'
+    props.collection = collection
+    props.use_camera = False
+    props.direction = 'AXIS_SPLIT'
+    props.center_mode = 'ACTIVE'
+    props.distance = 0.03
+    props.frame_start = 1
+    props.frame_end = 100
+
+    # Move the shell panels into their own sub-collection, the way a real
+    # project would already have them grouped.
+    shell_collection = bpy.data.collections.new("SHELL")
+    collection.children.link(shell_collection)
+    shells = [obj for name, obj in parts.items() if name.startswith("Shell_")]
+    for obj in shells:
+        collection.objects.unlink(obj)
+        shell_collection.objects.link(obj)
+
+    objects = list(collection.all_objects)
+    check(len(objects) == len(parts), "sub-collection objects are still in the source")
+
+    select(objects, active=parts['pcb'])
+    bpy.ops.eas.set_assembly_position()
+    assembled = world_matrices(objects)
+
+    # Nothing tagged yet.
+    props.use_phases = True
+    check(
+        not any(core.is_enclosure_member(props, o) for o in objects),
+        "no panels before the collection is set",
+    )
+
+    props.enclosure_collection = shell_collection
+    members = [o.name for o in objects if core.is_enclosure_member(props, o)]
+    check(sorted(members) == sorted(o.name for o in shells),
+          f"every object in the collection counts as a panel ({len(members)})")
+    check(not core.is_enclosure_member(props, parts['pcb']), "the board is not a panel")
+    check(
+        all(o.eas.role == 'PART' for o in shells),
+        "and it did so without touching the per object role",
+    )
+
+    # Detect Sides must work off the collection, not just tagged roles.
+    select(objects, active=parts['pcb'])
+    result = bpy.ops.eas.detect_sides()
+    check(result == {'FINISHED'}, "detect sides works from the collection")
+    expected = {
+        "Shell_Top": 'TOP', "Shell_Bottom": 'BOTTOM', "Shell_Front": 'FRONT',
+        "Shell_Back": 'BACK', "Shell_Right": 'RIGHT', "Shell_Left": 'LEFT',
+    }
+    wrong = [f"{n}={parts[n].eas.side}" for n, s in expected.items() if parts[n].eas.side != s]
+    check(not wrong, f"sides detected for collection members ({wrong})")
+
+    # They must animate as a shell: their own side, their own phase.
+    props.enclosure_custom_range = True
+    props.enclosure_frame_start = 70
+    props.enclosure_frame_end = 100
+    props.component_custom_range = True
+    props.component_frame_start = 1
+    props.component_frame_end = 60
+    bpy.ops.eas.animate(mode='ASSEMBLE')
+
+    shell_frames = [key_frames(o) for o in shells if key_frames(o)]
+    check(shell_frames and min(f[0] for f in shell_frames) >= 69.4,
+          f"panels move in the enclosure window ({min(f[0] for f in shell_frames):.0f})")
+
+    exploded = at_frame(props.frame_start, objects)
+    delta = exploded["Shell_Left"].translation - assembled["Shell_Left"].translation
+    check(delta.x < -1e-4 and abs(delta.z) < 1e-6,
+          f"a collection panel opens along its own side ({tuple(round(v, 3) for v in delta)})")
+
+    home = at_frame(props.frame_end, objects)
+    worst = max(
+        max(abs(x - y) for ra, rb in zip(assembled[n], home[n]) for x, y in zip(ra, rb))
+        for n in assembled
+    )
+    check(worst <= TOLERANCE, f"collection driven shell lands home ({worst:.3e})")
+
+    # A hand tagged object outside the collection still counts.
+    parts['connector'].eas.role = 'ENCLOSURE'
+    check(core.is_enclosure_member(props, parts['connector']),
+          "hand tagged objects still count alongside the collection")
+    parts['connector'].eas.role = 'PART'
+
+    # Clearing the collection gives the panels back.
+    props.enclosure_collection = None
+    check(
+        not any(core.is_enclosure_member(props, o) for o in shells),
+        "clearing the collection releases the panels",
+    )
+
+    props.component_custom_range = False
+    props.enclosure_custom_range = False
 
 
 def main():
@@ -1797,6 +1899,7 @@ def main():
     test_parts_offscreen()
     test_pre_post_roll()
     test_enclosure_custom_range()
+    test_enclosure_collection()
 
     print("\n" + "=" * 72)
     if FAILURES:
