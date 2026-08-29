@@ -259,10 +259,10 @@ class EAS_PT_enclosure(EASPanel, Panel):
         elif props.use_phases:
             block.label(text="No panels yet: pick a collection or mark some", icon='ERROR')
 
-        # Panels the add-on cannot reach never get animated, and the two
-        # reasons are fixed in different places.
-        hidden, outside = core.missing_from_source(context, props.enclosure_collection)
-        if hidden or outside:
+        # Panels the add-on cannot reach never get animated, and each reason is
+        # fixed somewhere else.
+        hidden, outside, parented = core.missing_from_source(context, props.enclosure_collection)
+        if hidden or outside or parented:
             warn = block.column(align=True)
             warn.scale_y = 0.85
             if outside:
@@ -271,6 +271,9 @@ class EAS_PT_enclosure(EASPanel, Panel):
             if hidden:
                 warn.label(text=f"{len(hidden)} panel(s) hidden or excluded", icon='ERROR')
                 warn.label(text="unhide them, or turn off Visible Only")
+            if parented:
+                warn.label(text=f"{len(parented)} panel(s) parented to a part", icon='ERROR')
+                warn.label(text="turn off Skip Parented Children to move them")
 
 
 class EAS_PT_animation(EASPanel, Panel):

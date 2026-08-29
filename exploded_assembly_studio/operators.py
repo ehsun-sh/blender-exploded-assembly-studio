@@ -1004,10 +1004,14 @@ class EAS_OT_detect_sides(Operator):
             # The panels can be perfectly well set up and still not reachable,
             # so say which collection is actually the problem.
             message = _no_parts_message(context)
-            hidden, outside = core.missing_from_source(context, props.enclosure_collection)
-            if hidden or outside:
-                message += f" (the enclosure collection's {len(hidden) + len(outside)} object(s) " \
-                           "are not reachable either)"
+            hidden, outside, parented = core.missing_from_source(
+                context, props.enclosure_collection
+            )
+            stranded = len(hidden) + len(outside) + len(parented)
+            if stranded:
+                message += (
+                    f" (the enclosure collection's {stranded} object(s) are not reachable either)"
+                )
             self.report({'ERROR'}, message)
             return {'CANCELLED'}
 
@@ -1021,7 +1025,9 @@ class EAS_OT_detect_sides(Operator):
             found.append(f"{part.obj.name}: {side.title()}")
 
         if not found:
-            hidden, outside = core.missing_from_source(context, props.enclosure_collection)
+            hidden, outside, parented = core.missing_from_source(
+                context, props.enclosure_collection
+            )
             if outside:
                 self.report(
                     {'ERROR'},
@@ -1034,12 +1040,15 @@ class EAS_OT_detect_sides(Operator):
                     f"{len(hidden)} object(s) in the enclosure collection are hidden or excluded "
                     f"from the view layer: " + ", ".join(hidden[:3]),
                 )
-            else:
+            elif parented:
                 self.report(
-                    {'WARNING'},
-                    "Nothing is an enclosure panel yet: pick an enclosure collection, or select "
-                    "the panels and press Mark Enclosure",
+                    {'ERROR'},
+                    f"{len(parented)} object(s) in the enclosure collection are parented to a "
+                    "part, so Skip Parented Children left them to follow it. Turn that off under "
+                    "Filtering to move them on their own: " + ", ".join(parented[:3]),
                 )
+            else:
+                self.report({'WARNING'}, core.enclosure_report(context))
             return {'CANCELLED'}
 
         props.use_phases = True

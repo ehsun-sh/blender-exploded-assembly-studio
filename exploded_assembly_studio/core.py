@@ -302,27 +302,73 @@ def source_report(context):
 
 
 def missing_from_source(context, collection):
-    """Split a collection's objects into (hidden, outside the source set).
+    """Split a collection's objects into (hidden, outside, parented).
 
-    Either way they will not be animated, but one is fixed in the outliner and
-    the other by pointing Source somewhere that contains them.
+    Three reasons an object never reaches the animation, and three different
+    places to fix it: unhide it in the outliner, point Source at something that
+    holds it, or turn off Skip Parented Children so a panel stops riding along
+    with the part it hangs off.
     """
     props = context.scene.eas
     if collection is None:
-        return [], []
+        return [], [], []
 
-    collected = {obj.name for obj in collect_objects(context)}
+    collected = list(collect_objects(context))
+    reachable = {obj.name for obj in collected}
+    members = set(collected)
     if props.source == 'COLLECTION' and props.collection is not None:
         in_source = {obj.name for obj in props.collection.all_objects}
     else:
         in_source = {obj.name for obj in context.selected_objects}
 
-    hidden, outside = [], []
+    hidden, outside, parented = [], [], []
     for obj in collection.all_objects:
-        if obj.type in SKIPPED_TYPES or obj.name in collected:
+        if obj.type in SKIPPED_TYPES or obj.name in reachable:
             continue
-        (hidden if obj.name in in_source else outside).append(obj.name)
-    return hidden, outside
+        if obj.name not in in_source:
+            outside.append(obj.name)
+        elif props.visible_only and not obj.visible_get():
+            hidden.append(obj.name)
+        elif props.skip_child_parts and _has_ancestor_in(obj, members):
+            # Dropped on purpose: it follows a part that *is* animated. Only a
+            # surviving ancestor is checked, because the chain above a dropped
+            # object always ends at one.
+            parented.append(obj.name)
+        else:
+            hidden.append(obj.name)
+    return hidden, outside, parented
+
+
+def enclosure_report(context):
+    """Say why nothing counts as a shell panel, with the numbers behind it.
+
+    Membership has two independent sources - the collection and the per object
+    role - so the message names both, and how much of the collection the add-on
+    can actually see.
+    """
+    props = context.scene.eas
+    collection = props.enclosure_collection
+    tagged = sum(
+        1 for obj in context.view_layer.objects
+        if obj.eas.role == 'ENCLOSURE' and not obj.eas.is_rig
+    )
+
+    if collection is None:
+        where = "no enclosure collection is set"
+    else:
+        usable = [obj for obj in collection.all_objects if obj.type not in SKIPPED_TYPES]
+        reachable = {obj.name for obj in collect_objects(context)}
+        inside = sum(1 for obj in usable if obj.name in reachable)
+        where = (
+            f"enclosure collection '{collection.name}' holds {len(usable)} object(s), "
+            f"{inside} of them in range"
+        )
+
+    return (
+        f"Nothing is an enclosure panel yet: {where}, and {tagged} object(s) are marked "
+        "Enclosure by hand. Pick an enclosure collection, or select the panels and press "
+        "Mark Enclosure"
+    )
 
 
 def _has_ancestor_in(obj, members):

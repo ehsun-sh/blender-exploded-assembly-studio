@@ -3,6 +3,28 @@
 All notable changes to Exploded Assembly Studio are documented here.
 This project follows [Semantic Versioning](https://semver.org/).
 
+## [1.10.3]
+
+### Fixed
+
+- **Restoring a snapshot quietly forgot the enclosure collection.** ID pointers were restored by
+  looking the saved name up in a hand written map of settings, and `Enclosure Collection` had never
+  been added to it, so the name was looked for among objects, found nothing, and the setting came
+  back empty. The enclosure then stopped being an enclosure, and `Detect Sides` reported that nothing
+  was tagged — with the collection still showing in the panel, because the restore ran before the
+  panel redrew. Pointers now resolve through the property's own type, so a setting added later cannot
+  be looked up in the wrong place.
+- **A panel parented to a part was reported as "hidden or excluded".** `Skip Parented Children` drops
+  it on purpose — it already follows the part it hangs off — but the message sent you into the
+  Outliner looking for something that was never hidden. That is now its own category, in `Detect
+  Sides` and in the Enclosure panel, naming the switch to turn off.
+
+### Changed
+
+- The "nothing is an enclosure panel yet" warning now carries its own diagnosis: the enclosure
+  collection by name (or that none is set), how many of its objects the add-on can currently reach,
+  and how many objects are marked Enclosure by hand.
+
 ## [1.10.2]
 
 ### Fixed

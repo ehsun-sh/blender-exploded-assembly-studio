@@ -20,14 +20,27 @@ from . import core
 #: outside the moment they were written.
 SKIPPED_SETTINGS = {'rna_type', 'snapshots', 'snapshot_index', 'camera_poses', 'last_report'}
 
-#: Which ID collection a pointer setting is looked up in when restoring.
-POINTER_SOURCES = {
-    'collection': 'collections',
-    'camera_object': 'objects',
-    'camera_pivot': 'objects',
-    'camera_target': 'objects',
-    'camera_subject': 'objects',
+#: Where each kind of ID pointer is looked up when restoring.
+ID_COLLECTIONS = {
+    'Collection': 'collections',
+    'Object': 'objects',
+    'Scene': 'scenes',
+    'Material': 'materials',
 }
+
+
+def pointer_source(props, name):
+    """The bpy.data collection a pointer setting resolves against.
+
+    Derived from the property's own type rather than a hand written map, so a
+    pointer added later cannot be silently looked up in the wrong place and
+    come back as None.
+    """
+    prop = props.bl_rna.properties.get(name)
+    fixed = getattr(prop, 'fixed_type', None)
+    if fixed is None:
+        return None
+    return ID_COLLECTIONS.get(fixed.identifier)
 
 OBJECT_FIELDS = ('role', 'side', 'order', 'distance_multiplier', 'exclude', 'has_state')
 
@@ -133,7 +146,8 @@ def _restore_settings(props, values):
             target = None
             reference = value['__ref__']
             if reference:
-                source = getattr(bpy.data, POINTER_SOURCES.get(name, 'objects'), None)
+                attribute = pointer_source(props, name)
+                source = getattr(bpy.data, attribute, None) if attribute else None
                 if source is not None:
                     target = source.get(reference)
             try:

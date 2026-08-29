@@ -1296,6 +1296,10 @@ def test_snapshots():
     # Set up a distinctive state worth coming back to.
     parts['top_case'].eas.role = 'ENCLOSURE'
     parts['top_case'].eas.side = 'TOP'
+    shell = bpy.data.collections.new("SNAP_SHELL")
+    scene.collection.children.link(shell)
+    shell.objects.link(parts['top_case'])
+    props.enclosure_collection = shell
     parts['connector'].eas.distance_multiplier = 2.5
     parts['pcb'].eas.exclude = True
     props.camera_mode = 'POSES'
@@ -1330,6 +1334,7 @@ def test_snapshots():
     props.camera_delay_start = 0
     props.phase_gap_frames = 0
     props.camera_poses.clear()
+    props.enclosure_collection = None
     parts['top_case'].eas.role = 'PART'
     parts['top_case'].eas.side = 'AUTO'
     parts['connector'].eas.distance_multiplier = 1.0
@@ -1349,6 +1354,22 @@ def test_snapshots():
     check(props.camera_delay_start == 14, "camera hold came back")
     check(props.phase_gap_frames == 17, "phase delay came back")
     check(props.collection == collection, "pointer setting came back")
+    # Collections were once looked up in bpy.data.objects, so a restore quietly
+    # cleared this one and the enclosure stopped being an enclosure.
+    check(props.enclosure_collection == shell,
+          f"the enclosure collection came back ({props.enclosure_collection})")
+
+    # And the guard against it coming back: a pointer added later must resolve
+    # on its own, without anyone remembering to extend a list.
+    unresolved = [
+        prop.identifier
+        for prop in props.bl_rna.properties
+        if prop.type == 'POINTER'
+        and not prop.is_readonly
+        and prop.identifier not in snapshots.SKIPPED_SETTINGS
+        and snapshots.pointer_source(props, prop.identifier) is None
+    ]
+    check(not unresolved, f"every pointer setting knows where it lives ({unresolved})")
 
     check(parts['top_case'].eas.role == 'ENCLOSURE', "per object role came back")
     check(parts['top_case'].eas.side == 'TOP', "per object side came back")
@@ -1968,21 +1989,58 @@ def test_source_diagnostics():
     check(raised == "" and result == {'CANCELLED'},
           "nothing tagged is a warning and a clean cancel, not an error")
 
-    # missing_from_source must split the two reasons apart.
+    # That warning is the one the user sees most, so it has to carry its own
+    # diagnosis: which collection, how much of it is in range, how many tags.
+    message = core.enclosure_report(bpy.context)
+    check("no enclosure collection is set" in message,
+          f"the warning says the collection is unset ({message[:70]})")
+    check("0 object(s) are marked Enclosure" in message,
+          "and counts the hand marked panels")
+
+    scene.eas.enclosure_collection = shell
+    message = core.enclosure_report(bpy.context)
+    check("'SHELL'" in message and "6 object(s)" in message,
+          f"a set collection is named with its size ({message[:70]})")
+    check("6 of them in range" in message, "and how many of them are reachable")
+
+    # missing_from_source must split the three reasons apart.
     scene, collection, shell, parts = fresh()
     outside_collection = bpy.data.collections.new("OUTSIDE")
     scene.collection.children.link(outside_collection)
     stray = add_box("Stray_Panel", (0.01, 0.01, 0.01), (0, 0, 0.2), outside_collection)
     scene.eas.enclosure_collection = outside_collection
-    hidden, outside = core.missing_from_source(bpy.context, outside_collection)
-    check(stray.name in outside and not hidden,
+    hidden, outside, parented = core.missing_from_source(bpy.context, outside_collection)
+    check(stray.name in outside and not hidden and not parented,
           f"an object outside Source is reported as outside ({outside})")
 
     scene.eas.enclosure_collection = shell
     layer_for("SHELL").exclude = True
-    hidden, outside = core.missing_from_source(bpy.context, shell)
-    check(len(hidden) == 6 and not outside,
+    hidden, outside, parented = core.missing_from_source(bpy.context, shell)
+    check(len(hidden) == 6 and not outside and not parented,
           f"an excluded panel is reported as hidden ({len(hidden)} hidden, {len(outside)} outside)")
+
+    # A panel parented to a part is dropped on purpose, and used to be reported
+    # as hidden - which sent the fix looking in the outliner for nothing.
+    scene, collection, shell, parts = fresh()
+    scene.eas.skip_child_parts = True
+    for obj in shell.all_objects:
+        obj.parent = parts['pcb']
+        obj.matrix_parent_inverse = parts['pcb'].matrix_world.inverted()
+    select(list(collection.all_objects), active=parts['pcb'])
+    hidden, outside, parented = core.missing_from_source(bpy.context, shell)
+    check(len(parented) == 6 and not hidden and not outside,
+          f"a parented panel is reported as parented ({len(parented)} parented, "
+          f"{len(hidden)} hidden)")
+
+    message = detect_error()
+    check("Skip Parented Children" in message,
+          f"and detect sides names the switch to turn off ({message[:70]})")
+
+    scene.eas.skip_child_parts = False
+    hidden, outside, parented = core.missing_from_source(bpy.context, shell)
+    check(not parented and not hidden and not outside,
+          "turning the switch off makes them reachable again")
+    check(detect_error() == "", "and detect sides then finds them")
 
 
 def test_hidden_sources():
