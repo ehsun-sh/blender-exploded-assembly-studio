@@ -969,6 +969,19 @@ class EAS_OT_mark_role(Operator):
             props.use_phases = True
 
         label = "enclosure panel" if self.role == 'ENCLOSURE' else "part"
+
+        # Marking is only half the job: an object the add-on cannot collect is
+        # never animated, and saying "marked" about it reads as success.
+        stranded = core.unreachable(context, targets)
+        if stranded:
+            self.report(
+                {'WARNING'},
+                f"Marked {len(targets)} object(s) as {label}, but {len(stranded)} of them are not "
+                f"in the Source set and will not be animated: " + ", ".join(stranded[:3]) +
+                ". Point Source at a collection that holds them",
+            )
+            return {'FINISHED'}
+
         self.report({'INFO'}, f"Marked {len(targets)} object(s) as {label}")
         return {'FINISHED'}
 

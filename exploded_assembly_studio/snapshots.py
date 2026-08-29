@@ -137,12 +137,20 @@ def from_json(text):
 # restore
 # ---------------------------------------------------------------------------
 
+def _is_reference(value):
+    return isinstance(value, dict) and '__ref__' in value
+
+
 def _restore_settings(props, values):
-    for name, value in values.items():
+    # Pointers go back first, then everything else. Assigning a pointer can run
+    # an update that switches a companion setting on - picking the enclosure
+    # collection turns the enclosure phase on - and the snapshot's own value has
+    # to be the one that survives.
+    for name, value in sorted(values.items(), key=lambda item: not _is_reference(item[1])):
         if not hasattr(props, name):
             continue  # written by a version that had a setting this one lacks
 
-        if isinstance(value, dict) and '__ref__' in value:
+        if _is_reference(value):
             target = None
             reference = value['__ref__']
             if reference:

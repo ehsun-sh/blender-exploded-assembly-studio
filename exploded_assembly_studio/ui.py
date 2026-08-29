@@ -259,6 +259,16 @@ class EAS_PT_enclosure(EASPanel, Panel):
         elif props.use_phases:
             block.label(text="No panels yet: pick a collection or mark some", icon='ERROR')
 
+        # Outside the greyed block on purpose: this is the switch that greys it.
+        # Panels set up while it is off animate as ordinary parts, which looks
+        # like the enclosure being ignored.
+        if not props.use_phases and (panels or props.enclosure_collection is not None):
+            off = layout.column(align=True)
+            off.scale_y = 0.85
+            off.label(text="Enclosure Closes Last is off", icon='ERROR')
+            off.label(text="tick the checkbox in this panel's header,")
+            off.label(text="or the panels move as ordinary parts")
+
         # Panels the add-on cannot reach never get animated, and each reason is
         # fixed somewhere else.
         hidden, outside, parented = core.missing_from_source(context, props.enclosure_collection)

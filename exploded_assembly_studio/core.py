@@ -215,6 +215,13 @@ def collect_objects(context):
     else:
         candidates = list(context.selected_objects)
 
+    # Choosing an enclosure collection in the add-on's own panel says those
+    # objects belong to the assembly. Requiring them to *also* sit inside the
+    # Source collection was a hidden coupling: the panels were named, tagged
+    # and listed, and then silently never animated.
+    if props.enclosure_collection is not None:
+        candidates += list(props.enclosure_collection.all_objects)
+
     result = []
     seen = set()
     for obj in candidates:
@@ -320,6 +327,9 @@ def missing_from_source(context, collection):
         in_source = {obj.name for obj in props.collection.all_objects}
     else:
         in_source = {obj.name for obj in context.selected_objects}
+    # The enclosure collection is a source in its own right.
+    if props.enclosure_collection is not None:
+        in_source |= {obj.name for obj in props.enclosure_collection.all_objects}
 
     hidden, outside, parented = [], [], []
     for obj in collection.all_objects:
@@ -337,6 +347,17 @@ def missing_from_source(context, collection):
         else:
             hidden.append(obj.name)
     return hidden, outside, parented
+
+
+def unreachable(context, objects):
+    """The names among ``objects`` the add-on cannot collect right now.
+
+    Marking a role is only half the job - an object outside the Source set is
+    never animated - so the operators that mark things ask this before calling
+    it a success.
+    """
+    reachable = {obj.name for obj in collect_objects(context)}
+    return [obj.name for obj in objects if obj.name not in reachable]
 
 
 def enclosure_report(context):

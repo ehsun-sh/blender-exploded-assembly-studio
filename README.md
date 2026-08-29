@@ -262,11 +262,17 @@ ASSEMBLE:   components land on the board   →   pause   →   shell closes in f
 EXPLODE:    shell opens outwards           →   pause   →   parts come off the board
 ```
 
-1. Select the shell panels → **Mark Enclosure**. (The opposite button puts them back to parts.)
+1. Point **Collection** at the collection holding the shell panels — or select them and press
+   **Mark Enclosure**. (The opposite button puts them back to parts.) Either one switches
+   `Enclosure Closes Last` on for you.
 2. **Detect Sides** works out which way each panel opens from where it sits — a lid above the product
    reads as Top, a panel out to the left reads as Left. Only the sides your product actually has get
    used, so a case with just a top and a bottom gets exactly those two.
 3. Build the animation.
+
+The enclosure collection does **not** have to live inside the Source collection. Choosing it here is
+enough: its objects join the assembly wherever they sit in the outliner. Objects tagged by hand with
+`Mark Enclosure` still have to be reachable from Source, and the button says so if they are not.
 
 Enclosure panels ignore the global explode direction and travel along their own side instead, which
 is what makes a six-sided case open outwards like a box rather than fanning along one axis.
@@ -552,14 +558,21 @@ blender -b --factory-startup --python tests/test_addon.py
 The suite builds a synthetic PCB product and drives the whole workflow: presets, saving state,
 explode, assemble, all four direction modes crossed with all three spacing modes, parented and
 rotated hierarchies, staggered sequencing, per-part overrides, exclusion, clearing animation, and
-all three camera modes, the enclosure phase and the multi viewpoint camera. Current result: **280 of 280 checks pass** on Blender 5.1.2.
+all three camera modes, the enclosure phase and the multi viewpoint camera. Current result: **301 of 301 checks pass** on Blender 5.1.2.
 
 The camera-framing tests re-derive the expected distance from the optics formula independently of
 the add-on, and check that it scales correctly with both subject size and focal length.
 
 The viewport capture operators need a real 3D viewport, so they are not covered headlessly; they
 were verified separately in a GUI session, where captured framings reproduce to about `1e-7` and all
-nine panels draw without error in every mode combination.
+eleven panels draw without error in every mode combination.
+
+### When something is not animating
+
+Open your own file, paste `tests/diagnose.py` into the Scripting workspace and press Run. It changes
+nothing and prints what the add-on can actually see: which collections are set, how many of their
+objects are in range, what counts as an enclosure panel, the frame windows, and which objects ended
+up with keyframes. That output usually names the problem outright.
 
 ---
 

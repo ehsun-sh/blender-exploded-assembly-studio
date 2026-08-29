@@ -1300,6 +1300,10 @@ def test_snapshots():
     scene.collection.children.link(shell)
     shell.objects.link(parts['top_case'])
     props.enclosure_collection = shell
+    # Deliberately off, with a collection set: assigning the pointer switches
+    # this on, so the restore has to put the pointers back before the values it
+    # saved, or the snapshot comes back with a setting it never held.
+    props.use_phases = False
     parts['connector'].eas.distance_multiplier = 2.5
     parts['pcb'].eas.exclude = True
     props.camera_mode = 'POSES'
@@ -1335,6 +1339,7 @@ def test_snapshots():
     props.phase_gap_frames = 0
     props.camera_poses.clear()
     props.enclosure_collection = None
+    props.use_phases = True
     parts['top_case'].eas.role = 'PART'
     parts['top_case'].eas.side = 'AUTO'
     parts['connector'].eas.distance_multiplier = 1.0
@@ -1358,6 +1363,8 @@ def test_snapshots():
     # cleared this one and the enclosure stopped being an enclosure.
     check(props.enclosure_collection == shell,
           f"the enclosure collection came back ({props.enclosure_collection})")
+    check(not props.use_phases,
+          "and a pointer's side effect did not overwrite what the snapshot held")
 
     # And the guard against it coming back: a pointer added later must resolve
     # on its own, without anyone remembering to extend a list.
@@ -1829,6 +1836,15 @@ def test_enclosure_collection():
     bpy.ops.eas.set_assembly_position()
     assembled = world_matrices(objects)
 
+    # The master switch. Every code path that treats a panel as a shell is
+    # gated behind use_phases, so picking a collection while it was off looked
+    # like it had worked and the panels animated as ordinary parts.
+    props.use_phases = False
+    props.enclosure_collection = shell_collection
+    check(props.use_phases, "picking the enclosure collection turns the phase on")
+    props.enclosure_collection = None
+    props.use_phases = False
+
     # Nothing tagged yet.
     props.use_phases = True
     check(
@@ -1957,23 +1973,33 @@ def test_source_diagnostics():
           f"an unreachable shell is reported as such ({message[:60]})")
     check("hidden or excluded" in message, "with the reason given")
 
-    # The source points somewhere empty.
+    # A broken Source with a good enclosure collection is no longer fatal: the
+    # enclosure collection is a source in its own right.
+    scene, collection, shell, parts = fresh()
+    scene.eas.collection = None
+    check(detect_error() == "",
+          "an unset Source is survivable while the enclosure collection stands")
+
+    # The Source diagnostics themselves, with nothing else supplying objects.
     scene, collection, shell, parts = fresh()
     empty = bpy.data.collections.new("NOTHING_HERE")
     scene.collection.children.link(empty)
     scene.eas.collection = empty
+    scene.eas.enclosure_collection = None
     message = detect_error()
     check("NOTHING_HERE" in message, f"an empty source names itself ({message[:60]})")
 
     # No collection chosen at all.
     scene, collection, shell, parts = fresh()
     scene.eas.collection = None
+    scene.eas.enclosure_collection = None
     message = detect_error()
     check("Pick a collection" in message, f"an unset source says so ({message[:60]})")
 
     # Selected-objects mode with an empty selection.
     scene, collection, shell, parts = fresh()
     scene.eas.source = 'SELECTED'
+    scene.eas.enclosure_collection = None
     bpy.ops.object.select_all(action='DESELECT')
     message = detect_error()
     check("Select the assembly parts" in message, f"an empty selection says so ({message[:60]})")
@@ -2003,15 +2029,29 @@ def test_source_diagnostics():
           f"a set collection is named with its size ({message[:70]})")
     check("6 of them in range" in message, "and how many of them are reachable")
 
-    # missing_from_source must split the three reasons apart.
+    # An enclosure collection sitting beside the Source collection rather than
+    # inside it used to be collected by nobody: named, tagged, listed in the
+    # panel, and never animated. Choosing it is enough.
     scene, collection, shell, parts = fresh()
     outside_collection = bpy.data.collections.new("OUTSIDE")
     scene.collection.children.link(outside_collection)
     stray = add_box("Stray_Panel", (0.01, 0.01, 0.01), (0, 0, 0.2), outside_collection)
     scene.eas.enclosure_collection = outside_collection
+    collected = {o.name for o in core.collect_objects(bpy.context)}
+    check(stray.name in collected,
+          f"an enclosure collection beside Source is collected anyway ({len(collected)})")
     hidden, outside, parented = core.missing_from_source(bpy.context, outside_collection)
-    check(stray.name in outside and not hidden and not parented,
-          f"an object outside Source is reported as outside ({outside})")
+    check(not hidden and not outside and not parented,
+          f"so nothing is reported unreachable ({hidden} {outside} {parented})")
+    check(core.is_enclosure_member(scene.eas, stray), "and it counts as a panel")
+    check(detect_error() == "", "and Detect Sides works on it")
+    check(stray.eas.side != 'AUTO', f"with a side detected ({stray.eas.side})")
+
+    select(list(collection.all_objects) + [stray], active=parts['pcb'])
+    bpy.ops.eas.set_assembly_position()
+    bpy.ops.eas.animate(mode='ASSEMBLE')
+    check(bool(key_frames(stray)),
+          "and it is actually animated, which was the whole complaint")
 
     scene.eas.enclosure_collection = shell
     layer_for("SHELL").exclude = True
@@ -2041,6 +2081,23 @@ def test_source_diagnostics():
     check(not parented and not hidden and not outside,
           "turning the switch off makes them reachable again")
     check(detect_error() == "", "and detect sides then finds them")
+
+    # Marking is only half the job: an object outside the Source set is never
+    # animated, and "Marked 3 object(s)" reads as success. Mark Enclosure asks
+    # core.unreachable before saying so.
+    scene, collection, shell, parts = fresh()
+    stray = add_box("Loose_Panel", (0.01, 0.01, 0.01), (0, 0, 0.3), scene.collection)
+    select([stray], active=stray)
+    result = bpy.ops.eas.mark_role(role='ENCLOSURE')
+    check(result == {'FINISHED'} and stray.eas.role == 'ENCLOSURE',
+          "an object outside Source can still be marked")
+    check(core.unreachable(bpy.context, [stray]) == [stray.name],
+          f"but it is reported unreachable ({core.unreachable(bpy.context, [stray])})")
+
+    select(list(collection.all_objects), active=parts['pcb'])
+    inside = [parts['pcb'], parts['Shell_Top']]
+    check(core.unreachable(bpy.context, inside) == [],
+          "while objects in the Source set are reachable")
 
 
 def test_hidden_sources():

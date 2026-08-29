@@ -128,6 +128,18 @@ def _seed_enclosure_range(self, context):
     self.enclosure_frame_end = int(round(end))
 
 
+def _enclosure_collection_set(self, context):
+    """Picking a collection turns the phase on, the way marking by hand does.
+
+    Every code path that treats a panel as a shell is gated behind use_phases,
+    so choosing the collection and nothing else looked like it had worked while
+    the panels quietly animated as ordinary parts. Marking by hand has always
+    switched it on; the collection is the same statement of intent.
+    """
+    if self.enclosure_collection is not None:
+        self.use_phases = True
+
+
 def _subject_poll(self, obj):
     """Only offer objects that can actually be framed."""
     if obj.eas.is_rig:
@@ -425,6 +437,7 @@ class EAS_SceneProperties(PropertyGroup):
         description="Every object in this collection counts as an enclosure panel, without having "
                     "to mark them one by one. Objects marked Enclosure by hand still count too",
         type=bpy.types.Collection,
+        update=_enclosure_collection_set,
     )
     enclosure_custom_range: BoolProperty(
         name="Custom Frame Range",

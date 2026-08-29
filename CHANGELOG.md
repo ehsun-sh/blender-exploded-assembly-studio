@@ -3,6 +3,31 @@
 All notable changes to Exploded Assembly Studio are documented here.
 This project follows [Semantic Versioning](https://semver.org/).
 
+## [1.11.0]
+
+### Fixed
+
+- **An enclosure collection had to sit inside the Source collection, and nothing said so.** Keeping
+  the shell in its own top level collection — the obvious way to organise a product — meant its
+  panels were named in the Enclosure panel, tagged, listed in the summary, and then never animated,
+  because `Source` was the only thing that decided which objects existed. Choosing a collection under
+  **Enclosure** is now enough on its own: its objects join the assembly wherever they sit in the
+  outliner.
+- **Picking the enclosure collection did not switch the phase on.** Every code path that treats a
+  panel as a shell is gated behind `Enclosure Closes Last`, and only `Mark Enclosure` ever set it. A
+  collection picked while it was off produced panels that animated as ordinary parts — the shell was
+  simply ignored. Picking a collection now switches it on, exactly as marking by hand always did, and
+  the panel says so plainly if the switch is off with panels set up.
+- **`Mark Enclosure` reported success for objects it could not reach.** Marking an object outside the
+  Source set changed its role and said "Marked 3 object(s)", while nothing would ever animate them.
+  It now warns, names them, and says where the fix is.
+
+### Added
+
+- `tests/diagnose.py` — a read-only script to paste into Blender's Scripting workspace. It prints
+  what the add-on can actually see in your file: collections, how many of their objects are in range,
+  what counts as a panel, the frame windows, and which objects ended up with keyframes.
+
 ## [1.10.3]
 
 ### Fixed
