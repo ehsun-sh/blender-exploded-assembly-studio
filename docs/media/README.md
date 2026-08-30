@@ -5,17 +5,42 @@ Drop screenshots and animations here, then uncomment the matching lines in the
 
 ## What goes where
 
-| File | What it shows |
+| File | What it shows | In the README |
+|---|---|---|
+| `demo.gif` | The assemble animation | Hero, top of the page |
+| `demo.mp4` | The same clip at full 1000 px | Not linked — see **Video** below |
+| `sidebar.png` | The add-on's sidebar panel | Gallery |
+
+Suggestions for more, whenever you take them — the names are not a rule, anything
+you reference from the README works:
+
+| File | What it would show |
 |---|---|
-| `demo.gif` | The hero animation, autoplaying at the top of the README |
-| `panel-source.png` | The Source and Presets panels |
 | `panel-enclosure.png` | The Enclosure panel with a collection picked and sides detected |
 | `panel-filtering.png` | Filtering, with `Move Together` on and the group count visible |
 | `panel-camera.png` | The Camera panel with viewpoints in the list |
-| `exploded.png` | A still of the exploded view |
-| `assembled.png` | The same product assembled, for a before/after pair |
+| `exploded.png` / `assembled.png` | A before/after still pair |
 
-Names are a suggestion, not a rule — anything you reference from the README works.
+## Why demo.gif is not the file you rendered
+
+The GIF here is rebuilt from `demo.mkv` rather than exported directly, because a
+GIF of a rendered 3D clip is nearly all background gradient, and that is the one
+thing the format is worst at. Shrinking it by dropping resolution makes the
+product soft while barely helping; the size is in the gradient, not the detail.
+
+What actually works is capping the palette and dithering it, at full resolution:
+
+```bash
+ffmpeg -i demo.mkv -vf "fps=12,scale=480:-1:flags=lanczos,palettegen=max_colors=128:stats_mode=diff" -y palette.png
+```
+
+```bash
+ffmpeg -i demo.mkv -i palette.png -lavfi "fps=12,scale=480:-1:flags=lanczos,paletteuse=dither=bayer:bayer_scale=3" -y demo.gif
+```
+
+`max_colors=128` is what keeps the file down; the dither is what stops 128 colours
+banding across a smooth grey backdrop. Dropping the dither saves another 1.5 MB and
+puts visible rings in the background — not worth it.
 
 ## Images
 
@@ -47,11 +72,29 @@ the right choice for a short hero clip.
 
 Keep it to 5-10 seconds and under ~8 MB, or GitHub gets slow to load.
 
+### MKV does not work at all
+
+GitHub plays `.mp4`, `.mov` and `.webm`. Matroska is not on the list, and the
+attachment uploader rejects the extension outright — so an `.mkv` can neither be
+embedded nor uploaded, however good it looks locally.
+
+It converts for free, though. A Blender-rendered MKV is normally already H.264 in
+a Matroska wrapper, so changing the container copies the video stream untouched —
+no re-encode, no quality loss, and it takes about a second:
+
+```bash
+ffmpeg -i demo.mkv -c copy -movflags +faststart -y demo.mp4
+```
+
+`-movflags +faststart` moves the index to the front of the file so playback can
+begin before the whole thing has downloaded. If `-c copy` errors, the stream is
+something other than H.264 and needs the real encode further down.
+
 ### MP4 — better quality, needs GitHub to host it
 
 GitHub only plays video it hosts itself. Upload it by dragging the file into the
-comment box of any issue, pull request, or release on the repo — **do not commit
-it**. GitHub replaces it with a URL like:
+comment box of any issue, pull request, or release on the repo — committing it to
+the repo does not make it playable. GitHub replaces it with a URL like:
 
 ```
 https://github.com/user-attachments/assets/0a1b2c3d-...

@@ -12,15 +12,12 @@ network gear, anything that comes apart into layers.
 Assembled model  →  Explode animation  →  Exploded view  →  Assemble animation  →  Assembled model
 ```
 
-<!-- GALLERY: drop files into docs/media/ and uncomment. See docs/media/README.md.
+![A bare board, its components landing, the enclosure closing over them](docs/media/demo.gif)
 
-![Assemble animation](docs/media/demo.gif)
-
-A committed .mp4 will not play here. Upload it by dragging the file into any issue
-or release comment on this repo, then paste the resulting
-https://github.com/user-attachments/assets/... URL on a line of its own, below.
-
--->
+<!-- For the full 1000px version with playback controls: drag docs/media/demo.mp4
+     into the comment box of any issue on this repo, copy the
+     https://github.com/user-attachments/assets/... URL it turns into, and paste
+     that URL on a line of its own right here. Then delete this comment. -->
 
 ---
 
@@ -190,22 +187,23 @@ you can go straight to **PCB Product → Set Assembly Position → ASSEMBLE**.
 
 ## Gallery
 
-<!-- Drop the files into docs/media/ and delete the comment markers around the
-     block you want. Naming and sizing guidance is in docs/media/README.md.
+<img src="docs/media/sidebar.png" alt="The add-on's sidebar panel in Blender" align="right" width="250">
 
-| Exploded | Assembled |
-|---|---|
-| ![Exploded view](docs/media/exploded.png) | ![Assembled product](docs/media/assembled.png) |
+The add-on lives in the 3D viewport sidebar under **Exploded**. The top block is the whole workflow
+in order — pick a source, save the assembled position, then build — and everything below it is
+optional refinement, collapsed until you need it.
 
-![The Source panel](docs/media/panel-source.png)
-![The Enclosure panel](docs/media/panel-enclosure.png)
-![Filtering, with Move Together on](docs/media/panel-filtering.png)
-![The Camera panel](docs/media/panel-camera.png)
+The screenshot is a real import: **2323 parts**, every one of them with its assembled position saved.
+`EXPLODE` and `ASSEMBLE` build the animation; `Rebuild Assemble` reruns the last build after a
+setting changes, so tuning does not mean clearing and starting again.
 
--->
+The animation above was built with this panel — a bare board, components landing on it, then the
+enclosure closing over the top, with the camera moving throughout.
 
-_Screenshots and a demo animation go here — see [docs/media](docs/media) for what
-GitHub will and will not play._
+<br clear="right">
+
+<!-- More screenshots go here as you take them; docs/media/README.md has the
+     sizing and naming guidance, and which formats GitHub will actually play. -->
 
 ---
 
