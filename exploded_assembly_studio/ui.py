@@ -685,6 +685,11 @@ class EAS_PT_hierarchy(EASPanel, Panel):
             layout.prop(props, "group_separator")
         elif props.group_mode == 'OVERLAP':
             layout.prop(props, "group_overlap")
+            layout.prop(props, "group_size_match")
+            hint = layout.column(align=True)
+            hint.scale_y = 0.85
+            hint.use_property_split = False
+            hint.label(text="Shell panels never join ordinary parts", icon='INFO')
 
         # A count is the only way to tell a working rule from a typo without
         # scrubbing the timeline.

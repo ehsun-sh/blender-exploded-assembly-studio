@@ -515,12 +515,16 @@ def group_key(props, obj):
 BOX_PAD = 1e-6
 
 
-def _overlap_ratio(low_a, high_a, low_b, high_b):
-    """Shared volume as a fraction of the smaller box. 0.0 when they miss.
+def _overlap_scores(low_a, high_a, low_b, high_b):
+    """(shared fraction of the smaller box, size ratio) for two boxes.
 
-    Measured against the smaller of the two on purpose: a chip body swallowing
-    its own pins should read as one part, while the same chip merely standing
-    on a board that dwarfs it should not.
+    The shared fraction is measured against the smaller of the two on purpose:
+    a chip body swallowing its own pins should read as one part, while the same
+    chip merely standing on a board that dwarfs it should not.
+
+    The size ratio is what separates a sibling from a container. Boxes are the
+    only thing available here and a hollow shell's box holds the entire product,
+    so containment alone would make the case and everything in it one part.
     """
     shared = 1.0
     volume_a = 1.0
@@ -529,13 +533,16 @@ def _overlap_ratio(low_a, high_a, low_b, high_b):
         low = max(low_a[axis] - BOX_PAD, low_b[axis] - BOX_PAD)
         high = min(high_a[axis] + BOX_PAD, high_b[axis] + BOX_PAD)
         if high <= low:
-            return 0.0
+            return 0.0, 0.0
         shared *= high - low
         volume_a *= high_a[axis] - low_a[axis] + 2.0 * BOX_PAD
         volume_b *= high_b[axis] - low_b[axis] + 2.0 * BOX_PAD
 
     smaller = min(volume_a, volume_b)
-    return shared / smaller if smaller > 0.0 else 0.0
+    larger = max(volume_a, volume_b)
+    if smaller <= 0.0 or larger <= 0.0:
+        return 0.0, 0.0
+    return shared / smaller, smaller / larger
 
 
 def _find(parent, item):
@@ -547,13 +554,29 @@ def _find(parent, item):
     return root
 
 
-def _overlap_assignments(objects, boxes, threshold):
+def overlap_role(props, obj):
+    """The boundary grouping must never cross.
+
+    A shell panel and an ordinary part move in different phases, so a group
+    spanning both could not be animated at all - and a case wrapped round a
+    product contains every part of it by definition. Two panels that open
+    towards different sides are the same problem one level down: a lid and a
+    base overlap at the seam, and joining them would send both the same way.
+    """
+    if not is_enclosure_member(props, obj):
+        return None
+    return obj.eas.side
+
+
+def _overlap_assignments(objects, boxes, roles, threshold, size_match):
     """Cluster objects whose boxes sit inside each other, transitively.
 
     Sweep and prune along X rather than testing every pair: an assembly of a
     few thousand parts is spread out along the board, so the active list stays
     short. One big object - the board itself - simply stays active for the whole
     sweep, which costs one comparison per part rather than blowing up.
+
+    Objects only ever join within one :func:`overlap_role`.
     """
     usable = [obj.name for obj in objects if boxes.get(obj.name) is not None]
     parent = {name: name for name in usable}
@@ -564,8 +587,11 @@ def _overlap_assignments(objects, boxes, threshold):
         low, high = boxes[name]
         active = [other for other in active if boxes[other][1].x >= low.x]
         for other in active:
+            if roles.get(name) != roles.get(other):
+                continue
             other_low, other_high = boxes[other]
-            if _overlap_ratio(low, high, other_low, other_high) >= threshold:
+            shared, ratio = _overlap_scores(low, high, other_low, other_high)
+            if shared >= threshold and ratio >= size_match:
                 root_a, root_b = _find(parent, name), _find(parent, other)
                 if root_a != root_b:
                     parent[root_a] = root_b
@@ -591,11 +617,15 @@ def group_assignments(props, objects, matrices=None):
 
     if mode == 'OVERLAP':
         boxes = {}
+        roles = {}
         for obj in objects:
             world = matrices.get(obj.name) if matrices else obj.matrix_world
             corners = bound_corners(obj, world) if world is not None else None
             boxes[obj.name] = bounds_of(corners) if corners else None
-        return _overlap_assignments(objects, boxes, props.group_overlap)
+            roles[obj.name] = overlap_role(props, obj)
+        return _overlap_assignments(
+            objects, boxes, roles, props.group_overlap, props.group_size_match
+        )
 
     return {obj.name: group_key(props, obj) for obj in objects}
 
@@ -614,8 +644,12 @@ def group_sizes(props, objects):
         props.group_mode,
         props.group_separator,
         round(props.group_overlap, 6),
+        round(props.group_size_match, 6),
+        props.enclosure_collection.name if props.enclosure_collection else None,
         len(objects),
-        hash(tuple(obj.name for obj in objects)),
+        # Role and side feed the overlap boundary, so tagging a panel has to
+        # invalidate this as surely as adding an object does.
+        hash(tuple((obj.name, obj.eas.role, obj.eas.side) for obj in objects)),
     )
     if _SIZES_CACHE.get('signature') == signature:
         return _SIZES_CACHE['sizes']

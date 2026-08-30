@@ -3,6 +3,26 @@
 All notable changes to Exploded Assembly Studio are documented here.
 This project follows [Semantic Versioning](https://semver.org/).
 
+## [1.14.0]
+
+### Fixed
+
+- **Overlap grouping swallowed the enclosure and everything under it into one part.** A case wrapped
+  round a product contains every part of it, so a bounding box test on its own said the shell, the
+  board and every component were one piece — which is both wrong and unanimatable, since the shell
+  and the parts move in different phases. A shell panel now never joins an ordinary part.
+- **A lid and a base could become one panel.** They overlap at the seam, and joined they would travel
+  the same way instead of opening in opposite directions. Panels whose sides differ are never
+  grouped, so running `Detect Sides` before building is what keeps them apart. Panels still on `Auto`
+  can merge, which is why the panel says to detect first.
+
+### Added
+
+- **Size Match**, next to `Overlap`. It requires two objects to be within a given volume ratio of
+  each other before they count as pieces of one part, so a large bracket stops swallowing the small
+  things sitting inside it. Off by default: pieces of one component are sometimes wildly different in
+  size — a chip body and a single lead — and the check would reject those too.
+
 ## [1.13.0]
 
 ### Added

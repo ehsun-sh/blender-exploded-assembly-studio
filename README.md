@@ -524,6 +524,20 @@ chip that swallows its own pins reads as one part while the same chip standing o
 it does not. Grouping is transitive, so one bad link can chain a whole board into a single part;
 raise `Overlap` until it stops, and the panel shows the largest part so you can see when it has.
 
+Two boundaries are never crossed, because bounding boxes alone would cross them badly:
+
+- **A shell panel never joins an ordinary part.** A case wrapped round a product contains every part
+  of it, so containment alone would make the whole product one immovable lump. They also move in
+  different phases, so such a group could not be animated at all.
+- **Panels opening towards different sides never join each other.** A lid and a base overlap at the
+  seam; joined, they would both travel the same way instead of opening. Run `Detect Sides` first and
+  this sorts itself out — before that, panels are all `Auto` and can still merge.
+
+`Size Match` is the general form of the same guard for ordinary parts: it requires the two objects to
+be within a given volume ratio of each other, so a large bracket stops swallowing the small things
+sitting inside it. It is off by default, because pieces of one component are sometimes wildly
+different in size — a chip body and a single lead — and the check would reject those too.
+
 On a 2311-object assembly the clustering takes 0.07 s and the panel's count is cached, so it does not
 re-run on every redraw.
 
@@ -592,7 +606,7 @@ blender -b --factory-startup --python tests/test_addon.py
 The suite builds a synthetic PCB product and drives the whole workflow: presets, saving state,
 explode, assemble, all four direction modes crossed with all three spacing modes, parented and
 rotated hierarchies, staggered sequencing, per-part overrides, exclusion, clearing animation, and
-all three camera modes, the enclosure phase and the multi viewpoint camera. Current result: **323 of 323 checks pass** on Blender 5.1.2.
+all three camera modes, the enclosure phase and the multi viewpoint camera. Current result: **335 of 335 checks pass** on Blender 5.1.2.
 
 The camera-framing tests re-derive the expected distance from the optics formula independently of
 the add-on, and check that it scales correctly with both subject size and focal length.

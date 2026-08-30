@@ -2379,6 +2379,76 @@ def test_grouping():
     check(len({tuple(round(v, 6) for v in p.offset) for p in left}) == 1,
           "the grouped pieces share one offset")
 
+    # An enclosure wraps the product, so its box holds every part by definition.
+    # Without a role boundary the case and everything inside it became one part.
+    shell = bpy.data.collections.new("SHELL")
+    collection.children.link(shell)
+    lid = add_box("Shell_Top", (0.12, 0.08, 0.03), (0, 0, 0.004), shell)
+    base = add_box("Shell_Bottom", (0.12, 0.08, 0.03), (0, 0, -0.004), shell)
+    scene.eas.enclosure_collection = shell
+    select(list(collection.all_objects), active=pcb)
+    bpy.ops.eas.set_assembly_position()
+
+    parts, _ = core.build_parts(bpy.context)
+    core.compute_explosion(bpy.context, parts)
+    by_name = {part.obj.name: part for part in parts}
+    sizes = {}
+    for part in parts:
+        sizes[part.group] = sizes.get(part.group, 0) + 1
+    check(by_name["Shell_Top"].group != by_name["ComponentBody.3088"].group,
+          "a shell panel does not swallow the components it wraps")
+    check(by_name["Shell_Top"].group != by_name["PCB"].group,
+          "nor the board it wraps")
+    check(max(sizes.values()) <= 3,
+          f"so no part is bigger than a real component ({sorted(sizes.values())})")
+    check(len({by_name[n].group for n in ("ComponentBody.3088", "ComponentBody.3089",
+                                          "ComponentBody.3090")}) == 1,
+          "and the component pieces are still found")
+
+    # A lid and a base overlap at the seam and open in opposite directions, so
+    # they must not become one panel either.
+    check(by_name["Shell_Top"].group == by_name["Shell_Bottom"].group,
+          "untagged panels that interpenetrate do group")
+    result = bpy.ops.eas.detect_sides()
+    check(result == {'FINISHED'}, "detect sides runs on the shell")
+    check((lid.eas.side, base.eas.side) == ('TOP', 'BOTTOM'),
+          f"and gives them opposite sides ({lid.eas.side}, {base.eas.side})")
+
+    parts, _ = core.build_parts(bpy.context)
+    core.compute_explosion(bpy.context, parts)
+    by_name = {part.obj.name: part for part in parts}
+    check(by_name["Shell_Top"].group != by_name["Shell_Bottom"].group,
+          "once the sides differ they are two parts again")
+    lifted = by_name["Shell_Top"].offset.z
+    dropped = by_name["Shell_Bottom"].offset.z
+    check(lifted > 0.0 > dropped,
+          f"and they open opposite ways ({lifted:+.3f}, {dropped:+.3f})")
+
+    # Size Match is the general form of the same guard, for a big ordinary part.
+    scene.eas.enclosure_collection = None
+    scene.eas.group_size_match = 0.0
+    parts, _ = core.build_parts(bpy.context)
+    core.compute_explosion(bpy.context, parts)
+    by_name = {part.obj.name: part for part in parts}
+    swallowed = by_name["Shell_Top"].group == by_name["ComponentBody.3088"].group
+    check(swallowed, "with no role and no size guard, a big box does swallow them")
+
+    scene.eas.group_size_match = 0.05
+    parts, _ = core.build_parts(bpy.context)
+    core.compute_explosion(bpy.context, parts)
+    by_name = {part.obj.name: part for part in parts}
+    check(by_name["Shell_Top"].group != by_name["ComponentBody.3088"].group,
+          "Size Match stops a part far bigger than its neighbour joining it")
+    check(len({by_name[n].group for n in ("ComponentBody.3088", "ComponentBody.3089",
+                                          "ComponentBody.3090")}) == 1,
+          "while pieces of comparable size still group")
+
+    scene.eas.group_size_match = 0.0
+    for obj in (lid, base):
+        bpy.data.objects.remove(obj, do_unlink=True)
+    bpy.data.collections.remove(shell)
+    select(list(collection.all_objects), active=pcb)
+
     # Chaining is transitive, so the threshold has to be able to break it.
     scene.eas.group_overlap = 0.95
     parts, _ = core.build_parts(bpy.context)

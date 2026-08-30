@@ -328,6 +328,16 @@ class EAS_SceneProperties(PropertyGroup):
         max=1.0,
         subtype='FACTOR',
     )
+    group_size_match: FloatProperty(
+        name="Size Match",
+        description="How alike in size two objects must be to count as pieces of one part, as the "
+                    "smaller one's volume over the larger's. Raise it when something big is "
+                    "swallowing the small parts sitting inside it. Zero switches the check off",
+        default=0.0,
+        min=0.0,
+        max=1.0,
+        subtype='FACTOR',
+    )
 
     # --------------------------------------------------------------- explosion
     direction: EnumProperty(
