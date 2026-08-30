@@ -14,10 +14,14 @@ Assembled model  →  Explode animation  →  Exploded view  →  Assemble anima
 
 ![A bare board, its components landing, the enclosure closing over them](docs/media/demo.gif)
 
-<!-- For the full 1000px version with playback controls: drag docs/media/demo.mp4
-     into the comment box of any issue on this repo, copy the
-     https://github.com/user-attachments/assets/... URL it turns into, and paste
-     that URL on a line of its own right here. Then delete this comment. -->
+**[▶ Watch it at full resolution](docs/media/demo.mp4)** — 1000 px, 24 fps, with playback controls.
+
+<!-- To embed that video inline as a player instead of a link, GitHub has to host
+     it in its own attachment store, and only a drag-and-drop produces such a URL:
+     open any issue on this repo, drag docs/media/demo.mp4 into the comment box,
+     copy the https://github.com/user-attachments/assets/... URL it becomes, and
+     paste it on a line of its own right here. The issue never has to be
+     submitted - the asset goes live the moment the upload finishes. -->
 
 ---
 
