@@ -92,20 +92,35 @@ something other than H.264 and needs the real encode further down.
 
 ### MP4 — better quality, needs GitHub to host it
 
-GitHub only plays video it hosts itself. Upload it by dragging the file into the
-comment box of any issue, pull request, or release on the repo — committing it to
-the repo does not make it playable. GitHub replaces it with a URL like:
+GitHub only plays video it hosts itself. Committing the file does not make it
+playable, and neither does linking to it — a relative link reaches the blob page,
+which refuses to preview anything this size. Upload it by dragging the file into
+the comment box of an issue, pull request, or release. GitHub replaces it with a
+URL like:
 
 ```
 https://github.com/user-attachments/assets/0a1b2c3d-...
 ```
 
 Put that URL **on a line of its own** in the README and it renders as a player
-with controls. You can close the issue afterwards; the asset stays.
+with controls. Do not wrap it in a link or an `<img>` tag — a bare line is what
+GitHub looks for.
 
-For a long walkthrough, attach the full quality file to a
-[Release](https://github.com/ehsun-sh/blender-exploded-assembly-studio/releases)
-as well, so people can download it rather than stream it.
+**Submit the comment.** Uploading is not enough: until some submitted content
+references the asset, the URL returns 404 to everyone except you, so the README
+looks fine while you are logged in and is broken for every visitor. That is what
+[issue #1](https://github.com/ehsun-sh/blender-exploded-assembly-studio/issues/1)
+is for — it holds the current demo alive. Closing it is fine; deleting it breaks
+the player.
+
+Check it the way a visitor sees it, not from a logged-in tab:
+
+```bash
+curl -sSL -o /dev/null -w "%{http_code} %{content_type}\n" -r 0-4095 "https://github.com/user-attachments/assets/..."
+```
+
+`206 video/mp4` means it is live. `404` means the referencing comment was never
+submitted.
 
 ## Making the files
 

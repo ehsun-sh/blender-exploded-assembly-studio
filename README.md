@@ -14,14 +14,21 @@ Assembled model  →  Explode animation  →  Exploded view  →  Assemble anima
 
 ![A bare board, its components landing, the enclosure closing over them](docs/media/demo.gif)
 
-**[▶ Watch it at full resolution](docs/media/demo.mp4)** — 1000 px, 24 fps, with playback controls.
+**Full resolution — 1000 px, 24 fps, with playback controls:**
 
-<!-- To embed that video inline as a player instead of a link, GitHub has to host
-     it in its own attachment store, and only a drag-and-drop produces such a URL:
-     open any issue on this repo, drag docs/media/demo.mp4 into the comment box,
-     copy the https://github.com/user-attachments/assets/... URL it becomes, and
-     paste it on a line of its own right here. The issue never has to be
-     submitted - the asset goes live the moment the upload finishes. -->
+https://github.com/user-attachments/assets/5094fec3-83b7-46f1-b4d7-896cf5bf9ed5
+
+<!-- The bare URL above is deliberate: GitHub turns an attachment-store URL on a
+     line of its own into a video player. Do not wrap it in a link or an img tag.
+
+     The asset stays reachable because issue #1 references it. An upload only
+     becomes publicly readable once submitted content points at it - before that
+     the URL 404s for everyone but the uploader. Closing that issue is fine;
+     deleting it would break this player.
+
+     A committed .mp4 cannot replace this. docs/media/demo.mp4 is the same file,
+     kept as the master, but a relative link to it only reaches GitHub's blob
+     page, which refuses to preview a file this size. -->
 
 ---
 
