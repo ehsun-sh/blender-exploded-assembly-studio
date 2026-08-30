@@ -12,9 +12,8 @@ network gear, anything that comes apart into layers.
 Assembled model  →  Explode animation  →  Exploded view  →  Assemble animation  →  Assembled model
 ```
 
-![A bare board, its components landing, the enclosure closing over them](docs/media/demo.gif)
-
-**Full resolution — 1000 px, 24 fps, with playback controls:**
+A bare board, its components landing on it, then the enclosure closing over the top — built by the
+add-on, camera move and all:
 
 https://github.com/user-attachments/assets/5094fec3-83b7-46f1-b4d7-896cf5bf9ed5
 
@@ -28,7 +27,13 @@ https://github.com/user-attachments/assets/5094fec3-83b7-46f1-b4d7-896cf5bf9ed5
 
      A committed .mp4 cannot replace this. docs/media/demo.mp4 is the same file,
      kept as the master, but a relative link to it only reaches GitHub's blob
-     page, which refuses to preview a file this size. -->
+     page, which refuses to preview a file this size.
+
+     docs/media/demo.gif is the same clip again, kept as the fallback for anywhere
+     this player does not reach. It is not shown here on purpose: it is a quarter
+     of the resolution at twice the size, and two copies of one eight second clip
+     stacked at the top of the page helped nobody. -->
+
 
 ---
 

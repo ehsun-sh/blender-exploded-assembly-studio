@@ -7,9 +7,19 @@ Drop screenshots and animations here, then uncomment the matching lines in the
 
 | File | What it shows | In the README |
 |---|---|---|
-| `demo.gif` | The assemble animation | Hero, top of the page |
-| `demo.mp4` | The same clip at full 1000 px | Not linked — see **Video** below |
+| `demo.mp4` | The assemble animation, 1000 px | Hero, via the attachment URL |
+| `demo.gif` | The same clip, 480 px | Nowhere — held as a fallback |
 | `sidebar.png` | The add-on's sidebar panel | Gallery |
+
+`demo.gif` is deliberately not displayed. It is a quarter of the resolution at
+twice the size, and stacking two copies of one eight second clip at the top of the
+page helped nobody. It is kept because the video depends on GitHub hosting it, and
+a GIF renders anywhere a Markdown file does — a mirror, a clone, an IDE preview.
+To fall back to it, put this above the video line:
+
+```markdown
+![A bare board, its components landing, the enclosure closing over them](docs/media/demo.gif)
+```
 
 Suggestions for more, whenever you take them — the names are not a rule, anything
 you reference from the README works:
