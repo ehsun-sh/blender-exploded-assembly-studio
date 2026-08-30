@@ -1,0 +1,13 @@
+# Media is binary: never let Git try to merge it or rewrite its line endings.
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.mp4 binary
+*.webm binary
+*.blend binary
+
+# Text files keep LF in the repository whatever the checkout platform does.
+*.py text eol=lf
+*.md text eol=lf
+*.toml text eol=lf

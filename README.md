@@ -5,12 +5,22 @@ both ways — explode and assemble — with an optional camera move. It is aimed
 visualisation for electronics and mechanical hardware: PCBs and enclosures, housings, gearboxes,
 network gear, anything that comes apart into layers.
 
-**Version 1.10.2** · tested on **Blender 5.1.2** · minimum **Blender 4.2** (extension install) or
+**Version 1.14.0** · tested on **Blender 5.1.2** · minimum **Blender 4.2** (extension install) or
 **Blender 3.0** (legacy add-on install)
 
 ```text
 Assembled model  →  Explode animation  →  Exploded view  →  Assemble animation  →  Assembled model
 ```
+
+<!-- GALLERY: drop files into docs/media/ and uncomment. See docs/media/README.md.
+
+![Assemble animation](docs/media/demo.gif)
+
+A committed .mp4 will not play here. Upload it by dragging the file into any issue
+or release comment on this repo, then paste the resulting
+https://github.com/user-attachments/assets/... URL on a line of its own, below.
+
+-->
 
 ---
 
@@ -21,6 +31,7 @@ Assembled model  →  Explode animation  →  Exploded view  →  Assemble anima
 - [Quick start: a PCB product](#quick-start-a-pcb-product)
 - [Checking it works](#checking-it-works)
 - [Try it without a model](#try-it-without-a-model)
+- [Gallery](#gallery)
 - [Panel reference](#panel-reference)
   - [Source](#source)
   - [Presets](#presets)
@@ -174,6 +185,27 @@ blender --python examples/demo_scene.py
 
 It creates the parts in a `PRODUCT_ASSEMBLY` collection, selects them, and makes the PCB active, so
 you can go straight to **PCB Product → Set Assembly Position → ASSEMBLE**.
+
+---
+
+## Gallery
+
+<!-- Drop the files into docs/media/ and delete the comment markers around the
+     block you want. Naming and sizing guidance is in docs/media/README.md.
+
+| Exploded | Assembled |
+|---|---|
+| ![Exploded view](docs/media/exploded.png) | ![Assembled product](docs/media/assembled.png) |
+
+![The Source panel](docs/media/panel-source.png)
+![The Enclosure panel](docs/media/panel-enclosure.png)
+![Filtering, with Move Together on](docs/media/panel-filtering.png)
+![The Camera panel](docs/media/panel-camera.png)
+
+-->
+
+_Screenshots and a demo animation go here — see [docs/media](docs/media) for what
+GitHub will and will not play._
 
 ---
 
